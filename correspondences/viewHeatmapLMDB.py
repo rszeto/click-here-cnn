@@ -4,12 +4,14 @@ import skimage.draw
 from createHeatmapUtils import *
 import skimage
 
-# Examine correspondence LMDBs 
-scaledImgs = getFirstNLmdbImgs('scaledLMDB', 100)
-heatmapImgs = getFirstNLmdbImgs('heatmapLMDB', 100)
-keyptClassVecs = getFirstNLmdbVecs('keyptClassLMDB', 100)
-viewptLabelVecs = getFirstNLmdbVecs('viewptLabelLMDB', 100)
+# Examine correspondence LMDBs
+imgSet = 'val'
+scaledImgs = getFirstNLmdbImgs(imgSet + '/scaledLMDB', 1e10)
+heatmapImgs = getFirstNLmdbImgs(imgSet + '/heatmapLMDB', 1e10)
+keyptClassVecs = getFirstNLmdbVecs(imgSet + '/keyptClassLMDB', 1e10)
+viewptLabelVecs = getFirstNLmdbVecs(imgSet + '/viewptLabelLMDB', 1e10)
 keys = scaledImgs.keys()
+print('Found %d keys for %s LMDBs' % (len(keys), imgSet))
 
 # Initialize figure and subplot handles for correspondence visualization
 f, ax = plt.subplots(1, 3)
@@ -50,18 +52,20 @@ for key in keys:
     plt.draw()
     plt.waitforbuttonpress()
 
-# Examine Render for CNN LMDBs
-r4cnnImgs = getFirstNLmdbImgs('/home/szetor/Documents/DENSO_VAC/RenderForCNN/data/real_lmdbs/voc12train_all_gt_bbox_lmdb_image', 1)
-r4cnnLabels = getFirstNLmdbVecs('/home/szetor/Documents/DENSO_VAC/RenderForCNN/data/real_lmdbs/voc12train_all_gt_bbox_lmdb_label', 1)
-keys = r4cnnImgs.keys()
+## Examine Render for CNN LMDBs
+#r4cnnImgs = getFirstNLmdbImgs('/home/szetor/Documents/DENSO_VAC/RenderForCNN/data/real_lmdbs/voc12train_all_gt_bbox_lmdb_image', 1)
+#r4cnnLabels = getFirstNLmdbVecs('/home/szetor/Documents/DENSO_VAC/RenderForCNN/data/real_lmdbs/voc12train_all_gt_bbox_lmdb_label', 1)
+#keys = r4cnnImgs.keys()
+#
+#for key in keys:
+#    r4cnnImg = r4cnnImgs[key]
+#    r4cnnViewptLabel = r4cnnLabels[key]
+#    print('Image size: %s' % (r4cnnImg.shape,))
+#    print('Viewpoint label: %s' % (r4cnnViewptLabel,))
+#    
+#    plt.figure()
+#    plt.imshow(r4cnnImg)
+#    plt.title('%s' % (r4cnnViewptLabel,))
+#    plt.show()
 
-for key in keys:
-    r4cnnImg = r4cnnImgs[key]
-    r4cnnViewptLabel = r4cnnLabels[key]
-    print('Image size: %s' % (r4cnnImg.shape,))
-    print('Viewpoint label: %s' % (r4cnnViewptLabel,))
-    
-    plt.figure()
-    plt.imshow(r4cnnImg)
-    plt.title('%s' % (r4cnnViewptLabel,))
-    plt.show()
+plt.close()

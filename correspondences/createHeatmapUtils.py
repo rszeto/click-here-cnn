@@ -2,7 +2,11 @@ import scipy.io as spio
 import numpy as np
 import caffe
 import lmdb
+import csv
+from scipy.ndimage import imread
+from scipy.misc import imresize
 from warnings import warn
+import sys
 
 import os.path
 
@@ -133,6 +137,77 @@ def saveVecToLMDB(txn, key, vec):
     datum = caffe.io.array_to_datum(vecCaffe)
     txn.put(key.encode('ascii'), datum.SerializeToString())
 
+######### Saving to LMDB from CSV spreadsheet ################################
+
+def saveScaledImgs(infoArr, lmdbObj):
+    with lmdbObj.begin(write=True) as txn:
+        for i, row in enumerate(infoArr):
+            if i % 1000 == 0:
+                pprint('Wrote %d scaled images to LMDB' % i)
+            # Recover full image
+            fullImagePath = row[0]
+            fullImage = imread(fullImagePath)
+            # Convert grayscale images to "color"
+            if fullImage.ndim == 2:
+                fullImage = np.dstack((fullImage, fullImage, fullImage))
+            # Recover object BB
+            bbox = np.array([int(row[1]), int(row[2]), int(row[3]), int(row[4])])
+            # Crop and scale the object
+            croppedImg = fullImage[bbox[1]:bbox[3], bbox[0]:bbox[2], :]
+            scaledImg = imresize(croppedImg, (IMAGE_SIZE, IMAGE_SIZE))
+            # Save
+            saveImgToLMDB(txn, '%08d' % i, scaledImg)
+
+def saveHeatmaps(infoArr, lmdbObj):
+    with lmdbObj.begin(write=True) as txn:
+        for i, row in enumerate(infoArr):
+            if i % 1000 == 0:
+                pprint('Wrote %d heatmap images to LMDB' % i)
+            try:
+                # Recover keypoint location on full image
+                keyptLocFull = [float(row[5]), float(row[6])]
+                # Recover object BB and size
+                bbox = np.array([int(row[1]), int(row[2]), int(row[3]), int(row[4])])
+                bboxSize = np.array([bbox[2]-bbox[0]+1, bbox[3]-bbox[1]])
+                # Calculate keypoint location inside box
+                keyptLoc = keyptLocFull - bbox[:2]
+                # Get keypoint location on IMAGE_SIZExIMAGE_SIZE scaled image
+                keyptLocScaled = np.floor(IMAGE_SIZE * keyptLoc / bboxSize).astype(np.uint8)
+                # Push keypoint inside image (sometimes it ends up on edge due to float arithmetic)
+                keyptLocScaled[0] = min(keyptLocScaled[0], IMAGE_SIZE-1)
+                keyptLocScaled[1] = min(keyptLocScaled[1], IMAGE_SIZE-1)
+                # Create heatmap
+                heatmap = np.zeros((IMAGE_SIZE, IMAGE_SIZE), dtype=np.uint8)
+                heatmap[keyptLocScaled[1], keyptLocScaled[0]] = 1
+                # Save heatmap image
+                saveImgToLMDB(txn, '%08d' % i, heatmap)
+            except:
+                warn('Problem with row:\n%s' % row)
+                raise
+
+def saveKeyptClasses(infoArr, lmdbObj):
+    with lmdbObj.begin(write=True) as txn:
+        for i, row in enumerate(infoArr):
+            if i % 1000 == 0:
+                pprint('Wrote %d keypoint class vectors to LMDB' % i)
+            # Recover keypoint class
+            keyptClass = int(row[7])
+            # Create one-hot vector for keypoint class
+            keyptClassVec = np.zeros(numKeyptTypes, dtype=np.uint8)
+            keyptClassVec[keyptClass] = 1
+            # Save vector
+            saveVecToLMDB(txn, '%08d' % i, keyptClassVec)
+
+def saveViewptLabels(infoArr, lmdbObj):
+    with lmdbObj.begin(write=True) as txn:
+        for i, row in enumerate(infoArr):
+            if i % 1000 == 0:
+                pprint('Wrote %d viewpoint labels to LMDB' % i)
+            # Recover viewpoint label
+            viewptLabel = np.array(row[8:], dtype=np.float64)
+            # Save viewpoint label
+            saveVecToLMDB(txn, '%08d' % i, viewptLabel)
+
 ######### Loading from LMDB (for debugging) ##################################
 
 def lmdbStrToImage(lmdbStr):
@@ -191,5 +266,5 @@ def getFirstNLmdbVecs(lmdbPath, N):
 ############ Other stuff
 
 def insideBox(point, box):
-    return point[0] >= box[0] and point[0] < box[2] \
-            and point[1] >= box[1] and point[1] < box[3]
+    return point[0] >= box[0] and point[0] <= box[2] \
+            and point[1] >= box[1] and point[1] <= box[3]
