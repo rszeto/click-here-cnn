@@ -124,3 +124,7 @@ def generate_image_view_lmdb(image_label_file, output_lmdb):
     
     # clean up
     os.system('rm %s' % (tmp_label_fout.name))
+
+    # Check that LMDB is not empty
+    numEntries = lmdb.open(output_lmdb+'_image', readonly=True).begin().stat()['entries']
+    print('Num entries in LMDB: %d' % numEntries)

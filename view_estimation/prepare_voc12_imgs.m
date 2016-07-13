@@ -13,7 +13,7 @@ function prepare_voc12_imgs(img_set, output_img_dir, opts)
 %   cropped images according to ground-truth bounding boxes (with jittering) and image filelists
 %
 
-addpath(fullfile(mfilename('fullpath'), '../../'));
+addpath(fullfile(fileparts(mfilename('fullpath')), '../'));
 global_variables;
 cls_names = g_cls_names;
 
