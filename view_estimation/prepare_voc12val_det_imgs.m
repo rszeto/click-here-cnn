@@ -7,7 +7,7 @@ function prepare_voc12val_det_imgs(output_img_dir, bbox_mat_filelist, resize_dim
 %   resize_dim (D): if >0 resize images to DxD.
 %
 
-addpath(fullfile(mfilename('fullpath'), '../../'));
+addpath(fullfile(fileparts(mfilename('fullpath')), '../'));
 global_variables;
 cls_names = g_cls_names;
 

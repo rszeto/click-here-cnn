@@ -1,6 +1,7 @@
 function [acc, mederr] = compute_vp_acc_mederror(view_filename, img_label_filename)
 
-est_views = importdata(view_filename);
+object = importdata(view_filename);
+est_views = object.data;
 object = importdata(img_label_filename);
 data = object.data;
 gt_views = data(:,2:4);

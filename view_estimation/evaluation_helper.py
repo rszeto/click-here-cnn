@@ -51,7 +51,8 @@ def viewpoint(img_filenames, class_idxs, output_result_file):
     # OUTPUT: apred epred tpred
     fout = open(output_result_file, 'w')
     for i in range(len(img_filenames)):
-        fout.write('%d %d %d\n' % (preds[0][i] % 360, preds[1][i] % 360, preds[2][i] % 360))
+        filename = os.path.basename(img_filenames[i])
+        fout.write('%s %d %d %d\n' % (filename, preds[0][i] % 360, preds[1][i] % 360, preds[2][i] % 360))
     fout.close()
     
     
@@ -305,7 +306,11 @@ def test_vp_acc(cls_names, img_name_file_list, result_folder, view_label_folder)
         # viewpoint estimation with caffe python
         # wirte <result_folder>/<class_name>_pred_view.txt
         output_result_file = os.path.join(result_folder, cls_names[i]+'_pred_view.txt')
-        viewpoint(tmp_img_filenames, tmp_class_idxs, output_result_file)
+        if not os.path.exists(output_result_file):
+            viewpoint(tmp_img_filenames, tmp_class_idxs, output_result_file)
+        else:
+            print('Predictions already saved to %s, skipping' % output_result_file)
+        # viewpoint(tmp_img_filenames, tmp_class_idxs, output_result_file)
    
 
     # compute Acc and MedErr

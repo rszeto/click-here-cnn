@@ -3,7 +3,7 @@ function test_gt(prediction_folder, view_label_folder, write_result)
 % view_label_folder contains <classname>.txt
 % write_result - if set to 1, write result to acc_mederr_results.txt in prediction_folder
 
-addpath(fullfile(mfilename('fullpath'), '../../'));
+addpath(fullfile(fileparts(mfilename('fullpath')), '../'));
 global_variables;
 
 N = numel(g_cls_names);

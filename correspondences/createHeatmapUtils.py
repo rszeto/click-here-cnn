@@ -1,16 +1,16 @@
 import scipy.io as spio
 import numpy as np
-import caffe
 import lmdb
 import csv
 from scipy.ndimage import imread
 from scipy.misc import imresize
 from warnings import warn
 import sys
-
 import os.path
-
 from pprint import pprint
+
+sys.path.append('/home/szetor/caffe/python')
+import caffe
 
 ######### Universal constants ################################################
 
@@ -139,11 +139,10 @@ def saveVecToLMDB(txn, key, vec):
 
 ######### Saving to LMDB from CSV spreadsheet ################################
 
-def saveScaledImgs(infoArr, lmdbObj):
+def saveScaledImgs(infoArr, lmdbObj, flip=True):
+    i = 0
     with lmdbObj.begin(write=True) as txn:
-        for i, row in enumerate(infoArr):
-            if i % 1000 == 0:
-                pprint('Wrote %d scaled images to LMDB' % i)
+        for row in infoArr:
             # Recover full image
             fullImagePath = row[0]
             fullImage = imread(fullImagePath)
@@ -155,58 +154,99 @@ def saveScaledImgs(infoArr, lmdbObj):
             # Crop and scale the object
             croppedImg = fullImage[bbox[1]:bbox[3], bbox[0]:bbox[2], :]
             scaledImg = imresize(croppedImg, (IMAGE_SIZE, IMAGE_SIZE))
-            # Save
+            # Save scaled image
             saveImgToLMDB(txn, '%08d' % i, scaledImg)
+            i += 1
+            # Save flipped scaled image
+            if flip:
+                scaledFlippedImg = np.fliplr(scaledImg)
+                saveImgToLMDB(txn, '%08d' % i, scaledFlippedImg)
+                i += 1
+            if i % 1000 == 0:
+                pprint('Wrote %d scaled images to LMDB' % i)
+    pprint('Wrote total of %d images' % i)
 
-def saveHeatmaps(infoArr, lmdbObj):
+def saveHeatmaps(infoArr, lmdbObj, flip=True):
+    i = 0
     with lmdbObj.begin(write=True) as txn:
-        for i, row in enumerate(infoArr):
+        for row in infoArr:
+            # Recover keypoint location on full image
+            keyptLocFull = [float(row[5]), float(row[6])]
+            # Recover object BB and size
+            bbox = np.array([int(row[1]), int(row[2]), int(row[3]), int(row[4])])
+            bboxSize = np.array([bbox[2]-bbox[0]+1, bbox[3]-bbox[1]])
+            # Calculate keypoint location inside box
+            keyptLoc = keyptLocFull - bbox[:2]
+            # Get keypoint location on IMAGE_SIZExIMAGE_SIZE scaled image
+            keyptLocScaled = np.floor(IMAGE_SIZE * keyptLoc / bboxSize).astype(np.uint8)
+            # Push keypoint inside image (sometimes it ends up on edge due to float arithmetic)
+            keyptLocScaled[0] = min(keyptLocScaled[0], IMAGE_SIZE-1)
+            keyptLocScaled[1] = min(keyptLocScaled[1], IMAGE_SIZE-1)
+            # Create heatmap
+            heatmap = np.zeros((IMAGE_SIZE, IMAGE_SIZE), dtype=np.uint8)
+            heatmap[keyptLocScaled[1], keyptLocScaled[0]] = 1
+            # Save heatmap image
+            saveImgToLMDB(txn, '%08d' % i, heatmap)
+            i += 1
+            # Save flipped heatmap
+            if flip:
+                heatmapFlipped = np.fliplr(heatmap)
+                saveImgToLMDB(txn, '%08d' % i, heatmapFlipped)
+                i += 1
             if i % 1000 == 0:
                 pprint('Wrote %d heatmap images to LMDB' % i)
-            try:
-                # Recover keypoint location on full image
-                keyptLocFull = [float(row[5]), float(row[6])]
-                # Recover object BB and size
-                bbox = np.array([int(row[1]), int(row[2]), int(row[3]), int(row[4])])
-                bboxSize = np.array([bbox[2]-bbox[0]+1, bbox[3]-bbox[1]])
-                # Calculate keypoint location inside box
-                keyptLoc = keyptLocFull - bbox[:2]
-                # Get keypoint location on IMAGE_SIZExIMAGE_SIZE scaled image
-                keyptLocScaled = np.floor(IMAGE_SIZE * keyptLoc / bboxSize).astype(np.uint8)
-                # Push keypoint inside image (sometimes it ends up on edge due to float arithmetic)
-                keyptLocScaled[0] = min(keyptLocScaled[0], IMAGE_SIZE-1)
-                keyptLocScaled[1] = min(keyptLocScaled[1], IMAGE_SIZE-1)
-                # Create heatmap
-                heatmap = np.zeros((IMAGE_SIZE, IMAGE_SIZE), dtype=np.uint8)
-                heatmap[keyptLocScaled[1], keyptLocScaled[0]] = 1
-                # Save heatmap image
-                saveImgToLMDB(txn, '%08d' % i, heatmap)
-            except:
-                warn('Problem with row:\n%s' % row)
-                raise
+    pprint('Wrote total of %d heatmaps' % i)
 
-def saveKeyptClasses(infoArr, lmdbObj):
+def saveKeyptClasses(infoArr, lmdbObj, flip=True):
+    i = 0
     with lmdbObj.begin(write=True) as txn:
-        for i, row in enumerate(infoArr):
-            if i % 1000 == 0:
-                pprint('Wrote %d keypoint class vectors to LMDB' % i)
-            # Recover keypoint class
+        for row in infoArr:
             keyptClass = int(row[7])
             # Create one-hot vector for keypoint class
             keyptClassVec = np.zeros(numKeyptTypes, dtype=np.uint8)
             keyptClassVec[keyptClass] = 1
             # Save vector
             saveVecToLMDB(txn, '%08d' % i, keyptClassVec)
-
-def saveViewptLabels(infoArr, lmdbObj):
-    with lmdbObj.begin(write=True) as txn:
-        for i, row in enumerate(infoArr):
+            i += 1
+            # Save keypoint class for flipped image
+            # Recover keypoint class
+            if flip:
+                saveVecToLMDB(txn, '%08d' % i, keyptClassVec)
+                i += 1
             if i % 1000 == 0:
-                pprint('Wrote %d viewpoint labels to LMDB' % i)
+                pprint('Wrote %d keypoint class vectors to LMDB' % i)
+    pprint('Wrote total of %d keypoint classes labels' % i)
+
+def saveViewptLabels(infoArr, lmdbObj, flip=True):
+    i = 0
+    with lmdbObj.begin(write=True) as txn:
+        for row in infoArr:
             # Recover viewpoint label
             viewptLabel = np.array(row[8:], dtype=np.float64)
             # Save viewpoint label
             saveVecToLMDB(txn, '%08d' % i, viewptLabel)
+            i += 1
+            if flip:
+                # Extract angles
+                classIdx = viewptLabel[0]
+                azimuth = viewptLabel[1] - classIdx*360
+                elevation = viewptLabel[2] - classIdx*360
+                tilt = viewptLabel[3] - classIdx*360
+                # Flip azimuth and tilt
+                newAzimuth = np.mod(360-azimuth, 360)
+                newTilt = np.mod(-1*tilt, 360)
+                # Save flipped version of viewpoint label
+                viewptLabelFlipped = np.array([
+                    classIdx,
+                    newAzimuth + classIdx*360,
+                    elevation + classIdx*360,
+                    newTilt + classIdx*360
+                ])
+                saveVecToLMDB(txn, '%08d' % i, viewptLabelFlipped)
+                i += 1
+            if i % 1000 == 0:
+                pprint('Wrote %d viewpoint labels to LMDB so far' % i)
+    pprint('Wrote total of %d viewpoint labels' % i)
 
 ######### Loading from LMDB (for debugging) ##################################
 
@@ -244,7 +284,7 @@ def _getFirstNLmdbX(lmdbPath, N, X):
         # Warn if N is greater than number of pairs in LMDB
         maxN = txn.stat()['entries']    
         if N > maxN:
-            warn('Only %d values in LMDB, showing all' % maxN)
+            warn('Only %d values in LMDB, obtaining all' % maxN)
     
         # Go through LMDB and populate array with images
         cursor = txn.cursor()
