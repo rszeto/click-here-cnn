@@ -25,10 +25,14 @@ from global_variables import *
     obj_filename is the obj file of the shape, view_num is the number of images to render for that shape
 '''
 def load_one_category_shape_list(shape_synset):
-    # return a list of (synset, md5, numofviews) tuples
     shape_md5_list = os.listdir(os.path.join(g_shapenet_root_folder,shape_synset))
-    view_num = g_syn_images_num_per_category / len(shape_md5_list)
-    shape_list = [(shape_synset, shape_md5, os.path.join(g_shapenet_root_folder, shape_synset, shape_md5, 'model.obj'), view_num) for shape_md5 in shape_md5_list]
+    shape_list = []
+    for i in range(len(shape_md5_list)):
+        shape_md5 = shape_md5_list[i]
+        view_num = g_syn_images_num_per_category/len(shape_md5_list) + int(i % len(shape_md5_list) < g_syn_images_num_per_category % len(shape_md5_list))
+        shape_list.append(((shape_synset, shape_md5, os.path.join(g_shapenet_root_folder, shape_synset, shape_md5, 'vertexnormal_model', 'model.obj'), view_num)))
+    # view_num = g_syn_images_num_per_category / len(shape_md5_list)
+    # shape_list = [(shape_synset, shape_md5, os.path.join(g_shapenet_root_folder, shape_synset, shape_md5, 'vertexnormal_model', 'model.obj'), view_num) for shape_md5 in shape_md5_list]
     return shape_list
 
 '''
@@ -62,16 +66,17 @@ def render_one_category_model_views(shape_list, view_params):
     print('Generating rendering commands...')
     commands = []
     for shape_synset, shape_md5, shape_file, view_num in shape_list:
-        # write tmp view file
-        tmp = tempfile.NamedTemporaryFile(dir=tmp_dirname, delete=False)
-        for i in range(view_num): 
-            paramId = random.randint(0, len(view_params)-1)
-            tmp_string = '%f %f %f %f\n' % (view_params[paramId][0], view_params[paramId][1], view_params[paramId][2], max(0.01,view_params[paramId][3]))
-            tmp.write(tmp_string)
-        tmp.close()
+        # write tmp view file if any views should be computed
+        if view_num > 0:
+            tmp = tempfile.NamedTemporaryFile(dir=tmp_dirname, delete=False)
+            for i in range(view_num):
+                paramId = random.randint(0, len(view_params)-1)
+                tmp_string = '%f %f %f %f\n' % (view_params[paramId][0], view_params[paramId][1], view_params[paramId][2], max(0.01,view_params[paramId][3]))
+                tmp.write(tmp_string)
+            tmp.close()
 
-        command = '%s %s --background --python %s -- %s %s %s %s %s > /dev/null 2>&1' % (g_blender_executable_path, g_blank_blend_file_path, os.path.join(BASE_DIR, 'render_model_views.py'), shape_file, shape_synset, shape_md5, tmp.name, os.path.join(g_syn_images_folder, shape_synset, shape_md5))
-        commands.append(command)
+            command = '%s %s --background --python %s -- %s %s %s %s %s > /dev/null 2>&1' % (g_blender_executable_path, g_blank_blend_file_path, os.path.join(BASE_DIR, 'render_model_views.py'), shape_file, shape_synset, shape_md5, tmp.name, os.path.join(g_syn_images_folder, shape_synset, shape_md5))
+            commands.append(command)
     print('done (%d commands)!'%(len(commands)))
     print commands[0]
 
@@ -82,9 +87,9 @@ def render_one_category_model_views(shape_list, view_params):
     pool = Pool(g_syn_rendering_thread_num)
     for idx, return_code in enumerate(pool.imap(partial(call, shell=True), commands)):
         if idx % report_step == 0:
-            print('[%s] Rendering command %d of %d' % (datetime.datetime.now().time(), idx, len(shape_list)))
+            print('[%s] Rendering command %d of %d' % (datetime.datetime.now().time(), idx, len(commands)))
         if return_code != 0:
-            print('Rendering command %d of %d (\"%s\") failed' % (idx, len(shape_list), commands[idx]))
+            print('Rendering command %d of %d (\"%s\") failed' % (idx, len(commands), commands[idx]))
     shutil.rmtree(tmp_dirname) 
 
 
