@@ -30,7 +30,7 @@ def load_one_category_shape_list(shape_synset):
     for i in range(len(shape_md5_list)):
         shape_md5 = shape_md5_list[i]
         view_num = g_syn_images_num_per_category/len(shape_md5_list) + int(i % len(shape_md5_list) < g_syn_images_num_per_category % len(shape_md5_list))
-        shape_list.append(((shape_synset, shape_md5, os.path.join(g_shapenet_root_folder, shape_synset, shape_md5, 'vertexnormal_model', 'model.obj'), view_num)))
+        shape_list.append(((shape_synset, shape_md5, os.path.join(g_shapenet_root_folder, shape_synset, shape_md5, 'vertexnormal_model', 'model.obj'), view_num, os.path.join(g_shapenet_root_folder, shape_synset, shape_md5, 'keypoints.json'))))
     # view_num = g_syn_images_num_per_category / len(shape_md5_list)
     # shape_list = [(shape_synset, shape_md5, os.path.join(g_shapenet_root_folder, shape_synset, shape_md5, 'vertexnormal_model', 'model.obj'), view_num) for shape_md5 in shape_md5_list]
     return shape_list
@@ -65,9 +65,9 @@ def render_one_category_model_views(shape_list, view_params):
 
     print('Generating rendering commands...')
     commands = []
-    for shape_synset, shape_md5, shape_file, view_num in shape_list:
+    for shape_synset, shape_md5, shape_file, view_num, keypoints_file in shape_list:
         # write tmp view file if any views should be computed
-        if view_num > 0:
+        if view_num > 0 and os.path.exists(keypoints_file):
             tmp = tempfile.NamedTemporaryFile(dir=tmp_dirname, delete=False)
             for i in range(view_num):
                 paramId = random.randint(0, len(view_params)-1)
@@ -75,10 +75,20 @@ def render_one_category_model_views(shape_list, view_params):
                 tmp.write(tmp_string)
             tmp.close()
 
-            command = '%s %s --background --python %s -- %s %s %s %s %s > /dev/null 2>&1' % (g_blender_executable_path, g_blank_blend_file_path, os.path.join(BASE_DIR, 'render_model_views.py'), shape_file, shape_synset, shape_md5, tmp.name, os.path.join(g_syn_images_folder, shape_synset, shape_md5))
+            # command = '%s %s --background --python %s -- %s %s %s %s %s > /dev/null 2>&1' % (g_blender_executable_path, g_blank_blend_file_path, os.path.join(BASE_DIR, 'render_model_views.py'), shape_file, shape_synset, shape_md5, tmp.name, os.path.join(g_syn_images_folder, shape_synset, shape_md5))
+            command = '%s %s --background --python %s -- %s %s %s %s %s %s > /dev/null 2>&1' % (
+                    g_blender_executable_path,
+                    g_blank_blend_file_path,
+                    os.path.join(BASE_DIR, 'render_model_views.py'),
+                    shape_file,
+                    shape_synset,
+                    shape_md5,
+                    tmp.name,
+                    os.path.join(g_syn_images_folder, shape_synset, shape_md5),
+                    keypoints_file)
             commands.append(command)
     print('done (%d commands)!'%(len(commands)))
-    print commands[0]
+    # print commands[0]
 
     print('Rendering, it takes long time...')
     report_step = 100

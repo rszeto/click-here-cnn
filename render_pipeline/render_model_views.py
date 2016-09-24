@@ -218,11 +218,13 @@ if __name__ == "__main__":
         camObj.rotation_quaternion[2] = q[2]
         camObj.rotation_quaternion[3] = q[3]
         # # ** multiply tilt by -1 to match pascal3d annotations **
-        # theta_deg = (-1*theta_deg)%360
-        # syn_image_file = './%s_%s_a%03d_e%03d_t%03d_d%03d.png' % (shape_synset, shape_md5, round(azimuth_deg), round(elevation_deg), round(theta_deg), round(rho))
-        # bpy.data.scenes['Scene'].render.filepath = os.path.join(syn_images_folder, syn_image_file)
-        # bpy.ops.render.render( write_still=True )
+        theta_deg = (-1*theta_deg)%360
+        syn_image_file = './%s_%s_a%03d_e%03d_t%03d_d%03d.png' % (shape_synset, shape_md5, round(azimuth_deg), round(elevation_deg), round(theta_deg), round(rho))
+        bpy.data.scenes['Scene'].render.filepath = os.path.join(syn_images_folder, syn_image_file)
+        bpy.ops.render.render( write_still=True )
 
+        # Get place to save keypoint locations
+        keypoint_2d_file = './%s_%s_a%03d_e%03d_t%03d_d%03d_keypoint2d.csv' % (shape_synset, shape_md5, round(azimuth_deg), round(elevation_deg), round(theta_deg), round(rho))
         # Get object reference
         bpy.ops.object.select_by_type(type='MESH')
         modelObj = bpy.context.selected_objects[0]
@@ -237,21 +239,22 @@ if __name__ == "__main__":
         # Compute pixel locations of keypoints
         with open(keypoints_file, 'r') as f:
             keypoints = json.load(f)
-        for name, loc in keypoints.items():
-            print(name)
-            keyptLoc_obj = Vector(loc)
-            keyptLoc = objToWorldMat * keyptLoc_obj
-            # Get keypoint on mesh
-            keyptLocOnMesh_obj, _, _ = modelObj.closest_point_on_mesh(keyptLoc_obj)
-            # Find where ray from camera to keypoint hits the model
-            rayEndpt = 5*(keyptLocOnMesh_obj - camLoc_obj) + camLoc_obj
-            intersect_obj, _, _ = modelObj.ray_cast(camLoc_obj, rayEndpt)
-            # Only do stuff if intersection and keypoint match
-            dist = (keyptLocOnMesh_obj - intersect_obj).length
-            print('\tDistance: ', dist)
-            if dist < 1e-5:
-                print('\tis visible')
-                pixel_coords = camToPixelCoords(bpy.context.scene, camObj, keyptLoc)
-                print('\tPixel coords:', pixel_coords)
-            else:
-                print('\tis not visible')
+        with open(os.path.join(syn_images_folder, keypoint_2d_file), 'w') as f:
+            for name, loc in keypoints.items():
+                print(name)
+                keyptLoc_obj = Vector(loc)
+                keyptLoc = objToWorldMat * keyptLoc_obj
+                # Get keypoint on mesh
+                keyptLocOnMesh_obj, _, _ = modelObj.closest_point_on_mesh(keyptLoc_obj)
+                # Find where ray from camera to keypoint hits the model
+                rayEndpt = 5*(keyptLocOnMesh_obj - camLoc_obj) + camLoc_obj
+                intersect_obj, _, _ = modelObj.ray_cast(camLoc_obj, rayEndpt)
+                # Only do stuff if intersection and keypoint match
+                dist = (keyptLocOnMesh_obj - intersect_obj).length
+                print('\tDistance: ', dist)
+                if dist < 1e-3:
+                    pixel_coords = camToPixelCoords(bpy.context.scene, camObj, keyptLoc)
+                    print('\tPixel coords:', pixel_coords)
+                    f.write('%s,%d,%d\n' % (name, pixel_coords[0], pixel_coords[1]))
+                else:
+                    print('\tis not visible')
