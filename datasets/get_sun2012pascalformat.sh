@@ -21,6 +21,8 @@ mkdir $dataset_dir
 tar -zxvf SUN2012pascalformat.tar.gz && rm -f SUN2012pascalformat.tar.gz
 mv SUN2012pascalformat/* $dataset_dir && rm -rf SUN2012pascalformat
 
+cd "$DIR/$dataset_dir"
 ls JPEGImages > filelist.txt
+cd "$DIR"
 
 echo "Done."

@@ -72,6 +72,13 @@ parfor(i = 1:image_num, num_workers)
         end
         %imwrite(I, dst_image_file, 'png', 'Alpha', alpha);
         imwrite(I, dst_image_file, 'jpg');
+        
+        src_keypoint2d_file = strrep(src_image_file, '.png', '_keypoint2d.csv');
+        dst_keypoint2d_file = strrep(src_keypoint2d_file, src_folder, dst_folder);
+        succeeded = copyfile(src_keypoint2d_file, dst_keypoint2d_file);
+        if ~succeeded
+            fprintf('Failed to copy %s\n', src_keypoint2d_file);
+        end
     end
     
     if mod(i, report_step) == 0
