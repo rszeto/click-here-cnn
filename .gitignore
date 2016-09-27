@@ -20,3 +20,4 @@ datasets/sun2012pascalformat
 caffe_models/*.zip
 *deformed*
 experiments
+*\.idea*
