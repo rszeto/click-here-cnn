@@ -146,18 +146,22 @@ def createSynKeypointCsv():
 
                 # Get CSV that lists keypoint locations in the image
                 csvPath = image_path.replace('.jpg', '_keypoint2d.csv')
-                keypointData = np.genfromtxt(csvPath, delimiter=',', dtype=None)
-                for row in keypointData:
-                    keypoint_name, x, y = row
-                    keypoint_class = KEYPOINTCLASS_INDEX_MAP[class_name + '_' + keypoint_name]
-                    finalLabel = (
-                        object_class,
-                        view2label(azimuth, object_class),
-                        view2label(elevation, object_class),
-                        view2label(tilt, object_class)
-                    )
-                    keyptStr = keypointInfo2Str(image_path, bbox, (x, y), keypoint_class, finalLabel)
-                    infoFile.write(keyptStr)
+                with open(csvPath, 'r') as f:
+                    for line in f.readlines():
+                        m = re.match('(.*),(.*),(.*)', line)
+                        keypoint_name, x, y = m.group(1, 2, 3)
+
+                        keypoint_loc = (float(x), float(y))
+                        keypoint_class = KEYPOINTCLASS_INDEX_MAP[class_name + '_' + keypoint_name]
+                        finalLabel = (
+                            object_class,
+                            view2label(azimuth, object_class),
+                            view2label(elevation, object_class),
+                            view2label(tilt, object_class)
+                        )
+                        keyptStr = keypointInfo2Str(image_path, bbox, keypoint_loc, keypoint_class, finalLabel)
+                        infoFile.write(keyptStr)
+
     infoFile.close()
 
 def createPascalKeypointCsv():

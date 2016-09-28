@@ -36,7 +36,7 @@ parfor(i = 1:image_num, num_workers)
     end
     
     fid = fopen(keypoint2d_file, 'r');
-    data = textscan(fid, '%s %d %d', 'Delimiter', ',');
+    data = textscan(fid, '%s %f %f', 'Delimiter', ',');
     fclose(fid);
     keypoint_name = data{1};
     keypoint_x = data{2};
@@ -72,7 +72,7 @@ parfor(i = 1:image_num, num_workers)
         dst_keypoint_file = strrep(dst_image_file, '.png', '_keypoint2d.csv');
         fid = fopen(dst_keypoint_file, 'w');
         for j=1:numel(keypoint_name_cr)
-            fprintf(fid, '%s,%d,%d\n', keypoint_name_cr{j}, keypoint_x_cr(j), keypoint_y_cr(j));
+            fprintf(fid, '%s,%f,%f\n', keypoint_name_cr{j}, keypoint_x_cr(j), keypoint_y_cr(j));
         end
         fclose(fid);
     end

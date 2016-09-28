@@ -146,7 +146,7 @@ def camToPixelCoords(scene, camObj, pt):
             int(scene.render.resolution_x * render_scale),
             int(scene.render.resolution_y * render_scale)
     )
-    pixel_coords = (round(pt2d.x * render_size[0]), round(pt2d.y * render_size[1]))
+    pixel_coords = (pt2d.x * render_size[0], pt2d.y * render_size[1])
     return pixel_coords
 
 if __name__ == "__main__":
@@ -255,6 +255,6 @@ if __name__ == "__main__":
                 if dist < 1e-3:
                     pixel_coords = camToPixelCoords(bpy.context.scene, camObj, keyptLoc)
                     print('\tPixel coords:', pixel_coords)
-                    f.write('%s,%d,%d\n' % (name, pixel_coords[0], pixel_coords[1]))
+                    f.write('%s,%f,%f\n' % (name, pixel_coords[0], pixel_coords[1]))
                 else:
                     print('\tis not visible')
