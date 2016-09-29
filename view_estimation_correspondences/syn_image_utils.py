@@ -177,34 +177,34 @@ def createPascalKeypointCsv():
     os.remove('trainImgIds.txt')
     os.remove('valImgIds.txt')
 
-    infoFileTrain = open(os.path.join(BASE_DIR, 'pascal_corresp_lmdb_info_train.csv'), 'w')
-    infoFileTrain.write(INFO_FILE_HEADER)
-    infoFileTest = open(os.path.join(BASE_DIR, 'pascal_corresp_lmdb_info_test.csv'), 'w')
-    infoFileTest.write(INFO_FILE_HEADER)
+    info_file_train = open(os.path.join(BASE_DIR, 'pascal_corresp_lmdb_info_train.csv'), 'w')
+    info_file_train.write(INFO_FILE_HEADER)
+    info_file_test = open(os.path.join(BASE_DIR, 'pascal_corresp_lmdb_info_test.csv'), 'w')
+    info_file_test.write(INFO_FILE_HEADER)
 
     for synset, class_name in synset_name_pairs:
         object_class = SYNSET_CLASSIDX_MAP[synset]
         for dataset_source in DATASET_SOURCES:
-            classSourceId = '%s_%s' % (class_name, dataset_source)
-            for annoFile in sorted(os.listdir(os.path.join(ANNOTATIONS_ROOT, classSourceId))):
-                annoFileId = os.path.splitext(os.path.basename(annoFile))[0]
-                if annoFileId in trainIds:
-                    annoFileSet = 'train'
-                elif annoFileId in testIds:
-                    annoFileSet = 'test'
+            class_source_id = '%s_%s' % (class_name, dataset_source)
+            for anno_file in sorted(os.listdir(os.path.join(ANNOTATIONS_ROOT, class_source_id))):
+                anno_file_id = os.path.splitext(os.path.basename(anno_file))[0]
+                if anno_file_id in trainIds:
+                    anno_file_set = 'train'
+                elif anno_file_id in testIds:
+                    anno_file_set = 'test'
                 else:
                     continue
 
-                anno = loadmat(os.path.join(ANNOTATIONS_ROOT, classSourceId, annoFile))['record']
-                fullImagePath = os.path.join(IMAGES_ROOT, classSourceId, anno['filename'])
-                fullImage = imread(fullImagePath)
+                anno = loadmat(os.path.join(ANNOTATIONS_ROOT, class_source_id, anno_file))['record']
+                full_image_path = os.path.join(IMAGES_ROOT, class_source_id, anno['filename'])
+                full_image = imread(full_image_path)
                 # Convert grayscale images to "color"
-                if fullImage.ndim == 2:
-                    fullImage = np.dstack((fullImage, fullImage, fullImage))
+                if full_image.ndim == 2:
+                    full_image = np.dstack((full_image, full_image, full_image))
 
                 # Make objs an array regardless of how many objects there are
                 objs = np.array([anno['objects']]) if isinstance(anno['objects'], dict) else anno['objects']
-                for objI, obj in enumerate(objs):
+                for obj_i, obj in enumerate(objs):
                     # Only deal with objects in current class
                     if obj['class'] == class_name:
                         # Get crop using bounding box from annotation
@@ -213,11 +213,11 @@ def createPascalKeypointCsv():
                         bbox = np.array(obj['bbox']) - 1
 
                         # Get visible and in-frame keypoints
-                        keypts = obj['anchors']
+                        keypoints = obj['anchors']
                         for keypoint_name in KEYPOINT_TYPES[class_name]:
                             # Get 0-indexed keypoint location
-                            keyptLocFull = keypts[keypoint_name]['location'] - 1
-                            if keyptLocFull.size > 0 and insideBox(keyptLocFull, bbox):
+                            keypoint_loc_full = keypoints[keypoint_name]['location'] - 1
+                            if keypoint_loc_full.size > 0 and insideBox(keypoint_loc_full, bbox):
                                 # Keypoint is valid, so save data associated with it
 
                                 # Get viewpoint label
@@ -225,7 +225,7 @@ def createPascalKeypointCsv():
                                 azimuth = np.mod(np.round(viewpoint['azimuth']), 360)
                                 elevation = np.mod(np.round(viewpoint['elevation']), 360)
                                 tilt = np.mod(np.round(viewpoint['theta']), 360)
-                                finalLabel = np.array([
+                                final_label = np.array([
                                     object_class,
                                     view2label(azimuth, object_class),
                                     view2label(elevation, object_class),
@@ -233,14 +233,14 @@ def createPascalKeypointCsv():
                                 )
                                 # Add info for current keypoint
                                 keypoint_class = KEYPOINTCLASS_INDEX_MAP[class_name + '_' + keypoint_name]
-                                keyptStr = keypointInfo2Str(fullImagePath, bbox, keyptLocFull, keypoint_class, finalLabel)
-                                if annoFileSet == 'train':
-                                    infoFileTrain.write(keyptStr)
+                                keypoint_str = keypointInfo2Str(full_image_path, bbox, keypoint_loc_full, keypoint_class, final_label)
+                                if anno_file_set == 'train':
+                                    info_file_train.write(keypoint_str)
                                 else:
-                                    infoFileTest.write(keyptStr)
+                                    info_file_test.write(keypoint_str)
 
-    infoFileTrain.close()
-    infoFileTest.close()
+    info_file_train.close()
+    info_file_test.close()
 
 if __name__ == '__main__':
     createSynKeypointCsv()
