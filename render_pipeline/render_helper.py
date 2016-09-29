@@ -26,13 +26,17 @@ from global_variables import *
 '''
 def load_one_category_shape_list(shape_synset):
     shape_md5_list = os.listdir(os.path.join(g_shapenet_root_folder,shape_synset))
+    # Only consider folders with keypoints. Remove next two lines all models have keypoints
+    has_keypoints_fn = lambda x: os.path.exists(os.path.join(g_shapenet_root_folder, shape_synset, x, 'keypoints.json'))
+    shape_md5_list = filter(has_keypoints_fn, shape_md5_list)
+
     shape_list = []
     for i in range(len(shape_md5_list)):
         shape_md5 = shape_md5_list[i]
+        # Compute how many renders of the current model should be produced
+        # First part divides num. renders across all models, second part adds one to some models to account for remainder
         view_num = g_syn_images_num_per_category/len(shape_md5_list) + int(i % len(shape_md5_list) < g_syn_images_num_per_category % len(shape_md5_list))
-        shape_list.append(((shape_synset, shape_md5, os.path.join(g_shapenet_root_folder, shape_synset, shape_md5, 'vertexnormal_model', 'model.obj'), view_num, os.path.join(g_shapenet_root_folder, shape_synset, shape_md5, 'keypoints.json'))))
-    # view_num = g_syn_images_num_per_category / len(shape_md5_list)
-    # shape_list = [(shape_synset, shape_md5, os.path.join(g_shapenet_root_folder, shape_synset, shape_md5, 'vertexnormal_model', 'model.obj'), view_num) for shape_md5 in shape_md5_list]
+        shape_list.append(((shape_md5, os.path.join(g_shapenet_root_folder, shape_synset, shape_md5, 'vertexnormal_model', 'model.obj'), view_num, os.path.join(g_shapenet_root_folder, shape_synset, shape_md5, 'keypoints.json'))))
     return shape_list
 
 '''
@@ -58,14 +62,14 @@ def load_one_category_shape_views(synset):
 @output:
     save rendered images to g_syn_images_folder/<synset>/<md5>/xxx.png
 ''' 
-def render_one_category_model_views(shape_list, view_params):
+def render_one_category_model_views(shape_synset, shape_list, view_params):
     tmp_dirname = tempfile.mkdtemp(dir=g_data_folder, prefix='tmp_view_')
     if not os.path.exists(tmp_dirname):
         os.mkdir(tmp_dirname)
 
     print('Generating rendering commands...')
     commands = []
-    for shape_synset, shape_md5, shape_file, view_num, keypoints_file in shape_list:
+    for shape_md5, shape_file, view_num, keypoints_file in shape_list:
         # write tmp view file if any views should be computed
         if view_num > 0 and os.path.exists(keypoints_file):
             tmp = tempfile.NamedTemporaryFile(dir=tmp_dirname, delete=False)

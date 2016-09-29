@@ -25,4 +25,4 @@ if __name__ == '__main__':
         print('%d: %s, %s\n' % (idx, synset, g_shape_names[idx]))
         shape_list = load_one_category_shape_list(synset)
         view_params = load_one_category_shape_views(synset)
-        render_one_category_model_views(shape_list, view_params)
+        render_one_category_model_views(synset, shape_list, view_params)
