@@ -15,7 +15,7 @@ def viewCorrespLmdbs(lmdbs_root, N):
 
     f, ax = plt.subplots(1, 3)
     plot_title = plt.suptitle('')
-    for key in keys:
+    for key in sorted(keys):
         image = images_dict[key]
         keypoint_loc_image = keypoint_loc_dict[key]
         keypoint_class_vec = keypoint_class_dict[key]
@@ -46,7 +46,7 @@ def viewCorrespLmdbs(lmdbs_root, N):
 
         # Set title
         title = ''
-        title += 'Short key: %s\n' % key[-40:]
+        title += 'Key: %s\n' % key
         title += '(Az, el, ti): (%d, %d, %d)\n' % (azimuth, elevation, tilt)
         title += 'Keypoint location (i,j): (%d, %d)\n' % (keypoint_loc_i, keypoint_loc_j)
         title += 'Keypoint class: %s (%d)' % (keypoint_name, keypoint_class)

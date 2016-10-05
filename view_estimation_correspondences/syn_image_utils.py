@@ -354,9 +354,10 @@ def createCorrespLmdbs(info_file_path, lmdbs_root):
 
     line_format = re.compile('(.*),(.*),(.*),(.*),(.*),(.*),(.*),(.*),(.*),(.*),(.*),(.*)')
     with open(info_file_path) as info_file:
-        for line in info_file.readlines():
+        lines = info_file.readlines()
+        for i, line in enumerate(lines):
             # Skip header row
-            if line == INFO_FILE_HEADER:
+            if i == 0:
                 continue
 
             # Extract info from the line
@@ -437,6 +438,9 @@ def createCorrespLmdbs(info_file_path, lmdbs_root):
             viewpoint_label_vec_r[3] = view2label(tilt_r, object_class)
             # Save label for reversed image
             write_vec_to_lmdb(viewpoint_label_lmdb, key_r, viewpoint_label_vec_r)
+
+            if i % 100 == 0:
+                print('Finished writing keypoint %d of %d' % (i, len(lines)))
 
 def getCorrespLmdbData(lmdbs_root, N):
     # Define LMDBs
