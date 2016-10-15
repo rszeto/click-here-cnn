@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(BASE_DIR)
 sys.path.append(os.path.dirname(BASE_DIR))
-import syn_image_utils as utils
+import gen_lmdb_utils as utils
 import global_variables as gv
 
 def viewCorrespLmdbs(lmdbs_root, N):
