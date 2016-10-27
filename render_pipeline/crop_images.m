@@ -6,7 +6,7 @@ end
 if single_thread
     num_workers = 0;
 else
-    num_workers = 24;
+    num_workers = 64;
 end
 
 image_files = rdir(fullfile(src_folder,'*/*.png'));

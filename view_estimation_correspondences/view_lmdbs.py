@@ -59,10 +59,11 @@ def viewCorrespLmdbs(lmdbs_root, N):
         plt.waitforbuttonpress()
 
 if __name__ == '__main__':
-    if len(sys.argv) != 3:
-        print('Usage: python view_lmdbs.py <lmdb root name> <# examples>')
+    if len(sys.argv) != 4:
+        print('Usage: python view_lmdbs.py <lmdb major root name> <proc number> <# examples>')
         exit()
 
-    lmdbs_root_name = sys.argv[1]
-    num_examples = int(sys.argv[2])
-    viewCorrespLmdbs(os.path.join(gv.g_corresp_folder, lmdbs_root_name), num_examples)
+    lmdbs_major_root_name = sys.argv[1]
+    proc_number = sys.argv[2]
+    num_examples = int(sys.argv[3])
+    viewCorrespLmdbs(os.path.join(gv.g_corresp_folder, lmdbs_major_root_name, proc_number), num_examples)

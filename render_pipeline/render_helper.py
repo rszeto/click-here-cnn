@@ -79,8 +79,8 @@ def render_one_category_model_views(shape_synset, shape_list, view_params):
                 tmp.write(tmp_string)
             tmp.close()
 
-            # command = '%s %s --background --python %s -- %s %s %s %s %s > /dev/null 2>&1' % (g_blender_executable_path, g_blank_blend_file_path, os.path.join(BASE_DIR, 'render_model_views.py'), shape_file, shape_synset, shape_md5, tmp.name, os.path.join(g_syn_images_folder, shape_synset, shape_md5))
             command = '%s %s --background --python %s -- %s %s %s %s %s %s > /dev/null 2>&1' % (
+            # command = '%s %s --background --python %s -- %s %s %s %s %s %s' % (
                     g_blender_executable_path,
                     g_blank_blend_file_path,
                     os.path.join(BASE_DIR, 'render_model_views.py'),
@@ -92,7 +92,7 @@ def render_one_category_model_views(shape_synset, shape_list, view_params):
                     keypoints_file)
             commands.append(command)
     print('done (%d commands)!'%(len(commands)))
-    # print commands[0]
+    print commands[0]
 
     print('Rendering, it takes long time...')
     report_step = 100
@@ -106,5 +106,40 @@ def render_one_category_model_views(shape_synset, shape_list, view_params):
             print('Rendering command %d of %d (\"%s\") failed' % (idx, len(commands), commands[idx]))
     shutil.rmtree(tmp_dirname) 
 
+'''
+@input:
+    shape_list and view_params as output of load_one_category_shape_list/views
+@output:
+    list of commands to save rendered images to g_syn_images_folder/<synset>/<md5>/xxx.png
+''' 
+def render_one_category_model_views_commands(shape_synset, shape_list, view_params):
+    tmp_dirname = tempfile.mkdtemp(dir=g_data_folder, prefix='tmp_view_')
+    if not os.path.exists(tmp_dirname):
+        os.mkdir(tmp_dirname)
 
+    print('Generating rendering commands...')
+    commands = []
+    for shape_md5, shape_file, view_num, keypoints_file in shape_list:
+        # write tmp view file if any views should be computed
+        if view_num > 0 and os.path.exists(keypoints_file):
+            tmp = tempfile.NamedTemporaryFile(dir=tmp_dirname, delete=False)
+            for i in range(view_num):
+                paramId = random.randint(0, len(view_params)-1)
+                tmp_string = '%f %f %f %f\n' % (view_params[paramId][0], view_params[paramId][1], view_params[paramId][2], max(0.01,view_params[paramId][3]))
+                tmp.write(tmp_string)
+            tmp.close()
 
+            command = '%s %s --background --python %s -- %s %s %s %s %s %s > /dev/null 2>&1' % (
+            # command = '%s %s --background --python %s -- %s %s %s %s %s %s' % (
+                    g_blender_executable_path,
+                    g_blank_blend_file_path,
+                    os.path.join(BASE_DIR, 'render_model_views.py'),
+                    shape_file,
+                    shape_synset,
+                    shape_md5,
+                    tmp.name,
+                    os.path.join(g_syn_images_folder, shape_synset, shape_md5),
+                    keypoints_file)
+            commands.append(command)
+    print('done (%d commands)!'%(len(commands)))
+    return (commands, tmp_dirname)

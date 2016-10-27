@@ -13,12 +13,13 @@ from warnings import warn
 import skimage
 import time
 import multiprocessing
+from pprint import pprint
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(BASE_DIR)
 sys.path.append(os.path.dirname(BASE_DIR))
 import global_variables as gv
-sys.path.append(os.path.join(BASE_DIR, '..', 'view_estimation'))
+# sys.path.append(os.path.join(BASE_DIR, '..', 'view_estimation'))
 
 sys.path.append(gv.g_pycaffe_path)
 import caffe
@@ -69,7 +70,7 @@ for i in range(len(KEYPOINT_CLASSES)):
 
 INFO_FILE_HEADER = 'imgPath,bboxTLX,bboxTLY,bboxBRX,bboxBRY,imgKeyptX,imgKeyptY,keyptClass,objClass,azimuthClass,elevationClass,rotationClass\n'
 LINE_FORMAT = re.compile('(.*),(.*),(.*),(.*),(.*),(.*),(.*),(.*),(.*),(.*),(.*),(.*)')
-DEFAULT_LMDB_SIZE = 96636764160
+DEFAULT_LMDB_SIZE = 1e13
 
 ######### Importing .mat files ###############################################
 ######### Reference: http://stackoverflow.com/a/8832212 ######################
@@ -299,8 +300,8 @@ def createSynKeypointCsv():
 
 def createPascalKeypointCsv():
     # Generate train and test lists and store in file
-    matlab_cmd = 'getPascalTrainValImgs'
-    os.system('matlab -nodisplay -r "try %s ; catch; end; quit;"' % matlab_cmd)
+    matlab_cmd = 'addpath(\'%s\'); getPascalTrainValImgs' % BASE_DIR
+    os.system('matlab -nodisplay -r "try %s; catch; end; quit;"' % matlab_cmd)
     # Get training and test image IDs
     with open('trainImgIds.txt', 'rb') as trainIdsFile:
         trainIds = np.loadtxt(trainIdsFile, dtype='string')
@@ -505,18 +506,61 @@ def csvLineToViewpointLabelDatum(arg_tuple):
     datum = vector_to_datum(viewpoint_label_vec)
     return datum
 
-def createCorrespLmdbs(info_file_path, lmdbs_root):
+def createCorrespLmdbsMinor(args):
+    proc_num, minor_jobs, lmdbs_minor_root = args
+    start = time.time()
+
+    if not os.path.exists(lmdbs_minor_root):
+        os.mkdir(lmdbs_minor_root)
+
+    # Define LMDBs
+    image_lmdb = lmdb.open(os.path.join(lmdbs_minor_root, 'image_lmdb'), map_size=DEFAULT_LMDB_SIZE)
+    keypoint_loc_lmdb = lmdb.open(os.path.join(lmdbs_minor_root, 'keypoint_loc_lmdb'), map_size=DEFAULT_LMDB_SIZE)
+    keypoint_class_lmdb = lmdb.open(os.path.join(lmdbs_minor_root, 'keypoint_class_lmdb'), map_size=DEFAULT_LMDB_SIZE)
+    viewpoint_label_lmdb = lmdb.open(os.path.join(lmdbs_minor_root, 'viewpoint_label_lmdb'), map_size=DEFAULT_LMDB_SIZE)
+
+    for i, minor_job in enumerate(minor_jobs):
+        line, reversed = minor_job
+        image_datum = csvLineToImageDatum(minor_job)
+        keypoint_image_datum = csvLineToKeypointImageDatum(minor_job)
+        keypoint_class_datum = csvLineToKeypointClassDatum(minor_job)
+        viewpoint_label_datum = csvLineToViewpointLabelDatum(minor_job)
+
+        # Extract info from the line
+        m = re.match(LINE_FORMAT, line)
+        full_image_path = m.group(1)
+        # Get keys for regular and reversed instance
+        image_name = os.path.basename(full_image_path)
+        if reversed:
+            key = appendRandomPrefix(image_name + '_r')
+        else:
+            key = appendRandomPrefix(image_name)
+
+        # Write datums
+        write_datum_to_lmdb(image_lmdb, key, image_datum)
+        write_datum_to_lmdb(keypoint_loc_lmdb, key, keypoint_image_datum)
+        write_datum_to_lmdb(keypoint_class_lmdb, key, keypoint_class_datum)
+        write_datum_to_lmdb(viewpoint_label_lmdb, key, viewpoint_label_datum)
+
+        if i % 1000 == 0:
+            now = time.time()
+            elapsed_sec = now - start
+            print('Finished writing keypoint %d/%d (proc %d)' % (i, len(minor_jobs), proc_num))
+            print('Time elapsed: %ds/%.1fm/%.1fh' % (elapsed_sec, elapsed_sec / 60.0, elapsed_sec / 3600.0))
+
+'''
+TODO: Randomness cannot be seeded easily since the keys are generated in each minor call. If time, move key generation
+to major call and push the keys to the minor function
+'''
+def createCorrespLmdbsMajor(info_file_path, lmdbs_major_root, num_procs, reverse):
     start = time.time()
     print('Generating LMDBs from CSV')
     print('Info file path: %s' % info_file_path)
-    print('LMDBs root: %s' % lmdbs_root)
+    print('LMDBs root: %s' % lmdbs_major_root)
     print('Start date: %s' % time.asctime(time.localtime(start)))
 
-    # Define LMDBs
-    image_lmdb = lmdb.open(os.path.join(lmdbs_root, 'image_lmdb'), map_size=DEFAULT_LMDB_SIZE)
-    keypoint_loc_lmdb = lmdb.open(os.path.join(lmdbs_root, 'keypoint_loc_lmdb'), map_size=DEFAULT_LMDB_SIZE)
-    keypoint_class_lmdb = lmdb.open(os.path.join(lmdbs_root, 'keypoint_class_lmdb'), map_size=DEFAULT_LMDB_SIZE)
-    viewpoint_label_lmdb = lmdb.open(os.path.join(lmdbs_root, 'viewpoint_label_lmdb'), map_size=DEFAULT_LMDB_SIZE)
+    if not os.path.exists(lmdbs_major_root):
+        os.mkdir(lmdbs_major_root)
 
     # Read the data info from the file
     with open(info_file_path) as info_file:
@@ -527,56 +571,33 @@ def createCorrespLmdbs(info_file_path, lmdbs_root):
     # Define functions to go from line to argument tuples
     line_to_arg_tuple = lambda l: (l, False)
     line_to_arg_tuple_r = lambda l: (l, True)
-    l2at_fs = (line_to_arg_tuple, line_to_arg_tuple_r)
+    # Generate all jobs
+    if reverse:
+        l2at_fs = (line_to_arg_tuple, line_to_arg_tuple_r)
+        all_minor_jobs = [f(line) for line in lines for f in l2at_fs]
+    else:
+        all_minor_jobs = [line_to_arg_tuple(line) for line in lines]
+    # Randomize the jobs across processors
+    random.shuffle(all_minor_jobs)
 
-    half_batch_size = gv.g_lmdb_full_batch_size/2
-    pool = multiprocessing.Pool(gv.g_lmdb_thread_count)
-    for i, line in enumerate(lines):
-        if i % half_batch_size == 0:
-            # Get arguments for the batch jobs
-            batch_range = range(i, min(i + half_batch_size, len(lines)))
-            lines_batch = [f(lines[k]) for k in batch_range for f in l2at_fs]
-            # Submit the jobs to the pool
-            image_datums_job = pool.map_async(csvLineToImageDatum, lines_batch)
-            keypoint_image_datums_job = pool.map_async(csvLineToKeypointImageDatum, lines_batch)
-            keypoint_class_datums_job = pool.map_async(csvLineToKeypointClassDatum, lines_batch)
-            viewpoint_label_datums_job = pool.map_async(csvLineToViewpointLabelDatum, lines_batch)
-            # Wait and get the results from the jobs
-            image_datums = image_datums_job.get()
-            keypoint_image_datums = keypoint_image_datums_job.get()
-            keypoint_class_datums = keypoint_class_datums_job.get()
-            viewpoint_label_datums = viewpoint_label_datums_job.get()
+    # Divide the minor jobs among the processors
+    num_jobs_per_proc = len(all_minor_jobs) / num_procs
+    remainder = len(all_minor_jobs) % num_procs
+    divided_minor_jobs = []
+    for i in range(num_procs):
+        if i < remainder:
+            minor_jobs = all_minor_jobs[i*num_jobs_per_proc+i:(i+1)*num_jobs_per_proc+i+1]
+        else:
+            minor_jobs = all_minor_jobs[i*num_jobs_per_proc+remainder:(i+1)*num_jobs_per_proc+remainder]
+        divided_minor_jobs.append((i, minor_jobs, os.path.join(lmdbs_major_root, str(i))))
 
-        # Extract info from the line
-        m = re.match(LINE_FORMAT, line)
-        full_image_path = m.group(1)
-
-        # Get keys for regular and reversed instance
-        image_name = os.path.basename(full_image_path)
-        key = appendRandomPrefix(image_name)
-        key_r = appendRandomPrefix(image_name + '_r')
-
-        # Write datums
-        i_batch = i % half_batch_size
-        write_datum_to_lmdb(image_lmdb, key, image_datums[2*i_batch])
-        write_datum_to_lmdb(image_lmdb, key_r, image_datums[2*i_batch+1])
-        write_datum_to_lmdb(keypoint_loc_lmdb, key, keypoint_image_datums[2*i_batch])
-        write_datum_to_lmdb(keypoint_loc_lmdb, key_r, keypoint_image_datums[2*i_batch+1])
-        write_datum_to_lmdb(keypoint_class_lmdb, key, keypoint_class_datums[2*i_batch])
-        write_datum_to_lmdb(keypoint_class_lmdb, key_r, keypoint_class_datums[2*i_batch+1])
-        write_datum_to_lmdb(viewpoint_label_lmdb, key, viewpoint_label_datums[2*i_batch])
-        write_datum_to_lmdb(viewpoint_label_lmdb, key_r, viewpoint_label_datums[2*i_batch+1])
-
-        if i % half_batch_size == 0:
-            now = time.time()
-            elapsed_sec = now-start
-            print('Finished writing keypoint %d/%d (batch %d/%d)' % (i, len(lines), i/half_batch_size, len(lines)/half_batch_size + 1))
-            print('Time elapsed: %ds/%.1fm/%.1fh' % (elapsed_sec, elapsed_sec/60.0, elapsed_sec/3600.0))
+    p = multiprocessing.Pool(num_procs)
+    p.map(createCorrespLmdbsMinor, divided_minor_jobs)
 
     now = time.time()
-    elapsed_sec = now-start
+    elapsed_sec = now - start
     print('End date: %s' % time.asctime(time.localtime(now)))
-    print('Time elapsed: %ds/%.1fm/%.1fh' % (elapsed_sec, elapsed_sec/60.0, elapsed_sec/3600.0))
+    print('Time elapsed: %ds/%.1fm/%.1fh' % (elapsed_sec, elapsed_sec / 60.0, elapsed_sec / 3600.0))
 
 def getCorrespLmdbData(lmdbs_root, N):
     # Define LMDBs
