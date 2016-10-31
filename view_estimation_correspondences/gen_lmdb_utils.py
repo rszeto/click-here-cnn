@@ -50,6 +50,11 @@ KEYPOINT_TYPES = {
     # 'tvmonitor': ['front_bottom_left', 'front_bottom_right', 'front_top_left', 'front_top_right', 'back_bottom_left', 'back_bottom_right', 'back_top_left', 'back_top_right']
 }
 
+SYNSET_OLDCLASSIDX_MAP = {}
+for i in range(len(gv.g_shape_synset_name_pairs)):
+    synset, _ = gv.g_shape_synset_name_pairs[i]
+    SYNSET_OLDCLASSIDX_MAP[synset] = i
+
 SYNSET_CLASSNAME_MAP = {}
 for synset, class_name in synset_name_pairs:
     SYNSET_CLASSNAME_MAP[synset] = class_name
@@ -270,7 +275,8 @@ def createSynKeypointCsv():
                 bbox = np.array([0, 0, image.shape[1]-1, image.shape[0]-1])
 
                 # Get class index from synset
-                object_class = SYNSET_CLASSIDX_MAP[synset]
+                # object_class = SYNSET_CLASSIDX_MAP[synset]
+                object_class = SYNSET_OLDCLASSIDX_MAP[synset]
                 class_name = SYNSET_CLASSNAME_MAP[synset]
 
                 # Extract azimuth, elevation, rotation from file name
@@ -319,7 +325,8 @@ def createPascalKeypointCsv():
     info_file_test.write(INFO_FILE_HEADER)
 
     for synset, class_name in synset_name_pairs:
-        object_class = SYNSET_CLASSIDX_MAP[synset]
+        # object_class = SYNSET_CLASSIDX_MAP[synset]
+        object_class = SYNSET_OLDCLASSIDX_MAP[synset]
         for dataset_source in DATASET_SOURCES:
             class_source_id = '%s_%s' % (class_name, dataset_source)
             for anno_file in sorted(os.listdir(os.path.join(ANNOTATIONS_ROOT, class_source_id))):
@@ -593,6 +600,74 @@ def createCorrespLmdbsMajor(info_file_path, lmdbs_major_root, num_procs, reverse
 
     p = multiprocessing.Pool(num_procs)
     p.map(createCorrespLmdbsMinor, divided_minor_jobs)
+
+    now = time.time()
+    elapsed_sec = now - start
+    print('End date: %s' % time.asctime(time.localtime(now)))
+    print('Time elapsed: %ds/%.1fm/%.1fh' % (elapsed_sec, elapsed_sec / 60.0, elapsed_sec / 3600.0))
+
+def createCorrespLmdbs(info_file_path, lmdbs_root, reverse):
+    start = time.time()
+    print('Generating LMDBs from CSV')
+    print('Info file path: %s' % info_file_path)
+    print('LMDBs root: %s' % lmdbs_root)
+    print('Start date: %s' % time.asctime(time.localtime(start)))
+
+    if not os.path.exists(lmdbs_root):
+        os.mkdir(lmdbs_root)
+
+    # Read the data info from the file
+    with open(info_file_path) as info_file:
+        lines = info_file.readlines()
+    # Remove header row
+    lines = lines[1:]
+
+    # Define functions to go from line to argument tuples
+    line_to_arg_tuple = lambda l: (l, False)
+    line_to_arg_tuple_r = lambda l: (l, True)
+    # Generate all jobs
+    if reverse:
+        l2at_fs = (line_to_arg_tuple, line_to_arg_tuple_r)
+        all_jobs = [f(line) for line in lines for f in l2at_fs]
+    else:
+        all_jobs = [line_to_arg_tuple(line) for line in lines]
+    # Randomize the jobs
+    random.shuffle(all_jobs)
+
+    # Define LMDBs
+    image_lmdb = lmdb.open(os.path.join(lmdbs_root, 'image_lmdb'), map_size=DEFAULT_LMDB_SIZE)
+    keypoint_loc_lmdb = lmdb.open(os.path.join(lmdbs_root, 'keypoint_loc_lmdb'), map_size=DEFAULT_LMDB_SIZE)
+    keypoint_class_lmdb = lmdb.open(os.path.join(lmdbs_root, 'keypoint_class_lmdb'), map_size=DEFAULT_LMDB_SIZE)
+    viewpoint_label_lmdb = lmdb.open(os.path.join(lmdbs_root, 'viewpoint_label_lmdb'), map_size=DEFAULT_LMDB_SIZE)
+
+    for i, job in enumerate(all_jobs):
+        line, reversed = job
+        image_datum = csvLineToImageDatum(job)
+        keypoint_image_datum = csvLineToKeypointImageDatum(job)
+        keypoint_class_datum = csvLineToKeypointClassDatum(job)
+        viewpoint_label_datum = csvLineToViewpointLabelDatum(job)
+
+        # Extract info from the line
+        m = re.match(LINE_FORMAT, line)
+        full_image_path = m.group(1)
+        # Get keys for regular and reversed instance
+        image_name = os.path.basename(full_image_path)
+        if reversed:
+            key = appendRandomPrefix(image_name + '_r')
+        else:
+            key = appendRandomPrefix(image_name)
+
+        # Write datums
+        write_datum_to_lmdb(image_lmdb, key, image_datum)
+        write_datum_to_lmdb(keypoint_loc_lmdb, key, keypoint_image_datum)
+        write_datum_to_lmdb(keypoint_class_lmdb, key, keypoint_class_datum)
+        write_datum_to_lmdb(viewpoint_label_lmdb, key, viewpoint_label_datum)
+
+        if i % 1000 == 0:
+            now = time.time()
+            elapsed_sec = now - start
+            print('Finished writing keypoint %d/%d' % (i, len(all_jobs)))
+            print('Time elapsed: %ds/%.1fm/%.1fh' % (elapsed_sec, elapsed_sec / 60.0, elapsed_sec / 3600.0))
 
     now = time.time()
     elapsed_sec = now - start

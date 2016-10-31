@@ -3,6 +3,7 @@ import sys
 import os
 import skimage
 import matplotlib.pyplot as plt
+import lmdb
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(BASE_DIR)
@@ -47,7 +48,7 @@ def viewCorrespLmdbs(lmdbs_root, N):
         # Set title
         title = ''
         title += 'Key: %s\n' % key
-        title += '(Az, el, ti): (%d, %d, %d)\n' % (azimuth, elevation, tilt)
+        title += '(Obj_cls, az, el, ti): (%d, %d, %d, %d)\n' % (object_class, azimuth, elevation, tilt)
         title += 'Keypoint location (i,j): (%d, %d)\n' % (keypoint_loc_i, keypoint_loc_j)
         title += 'Keypoint class: %s (%d)' % (keypoint_name, keypoint_class)
         plot_title.set_text(title)
@@ -58,12 +59,41 @@ def viewCorrespLmdbs(lmdbs_root, N):
         plt.draw()
         plt.waitforbuttonpress()
 
+def viewImageLmdbs(image_lmdb_root, N):
+    image_lmdb = lmdb.open(image_lmdb_root, readonly=True)
+    images_dict = utils.getFirstNLmdbImgs(image_lmdb, N)
+    keys = images_dict.keys()
+
+    f, ax = plt.subplots(1, 2)
+    plot_title = plt.suptitle('')
+    for key in sorted(keys):
+        image = images_dict[key]
+        ax[0].imshow(image)
+
+        # Set title
+        title = ''
+        title += 'Key: %s\n' % key
+        plot_title.set_text(title)
+
+        # Hide axes
+        plt.setp([a.get_xticklabels() for a in ax], visible=False)
+        plt.setp([a.get_yticklabels() for a in ax], visible=False)
+        plt.draw()
+        plt.waitforbuttonpress()
+
 if __name__ == '__main__':
     if len(sys.argv) != 4:
-        print('Usage: python view_lmdbs.py <lmdb major root name> <proc number> <# examples>')
+        print('Usage: python view_lmdbs.py <root path of lmdb(s)> <# examples> <mode>')
+        print('Mode can be either "correspondences" or "images"')
         exit()
 
-    lmdbs_major_root_name = sys.argv[1]
-    proc_number = sys.argv[2]
-    num_examples = int(sys.argv[3])
-    viewCorrespLmdbs(os.path.join(gv.g_corresp_folder, lmdbs_major_root_name, proc_number), num_examples)
+    if sys.argv[3] == 'correspondences':
+        lmdbs_root_path = sys.argv[1]
+        num_examples = int(sys.argv[2])
+        viewCorrespLmdbs(lmdbs_root_path, num_examples)
+    elif sys.argv[3] == 'images':
+        image_lmdb_root = sys.argv[1]
+        num_examples = int(sys.argv[2])
+        viewImageLmdbs(image_lmdb_root, num_examples)
+    else:
+        print('Unrecognized mode ' + sys.argv[3])
