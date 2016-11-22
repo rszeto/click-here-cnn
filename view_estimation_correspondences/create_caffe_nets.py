@@ -1,5 +1,6 @@
 import os
 import sys
+from warnings import warn
 
 # Import global variables
 view_estimation_correspondences_path = os.path.dirname(os.path.abspath(__file__))
@@ -35,6 +36,55 @@ DEFAULT_ACCURACY_VIEW_PARAM_A = dict(tol_angle=15, period=360)
 DEFAULT_ACCURACY_VIEW_PARAM_ET = dict(tol_angle=5, period=360)
 DEFAULT_ACCURACY_VIEW_PARAMS = [DEFAULT_ACCURACY_VIEW_PARAM_A, DEFAULT_ACCURACY_VIEW_PARAM_ET, DEFAULT_ACCURACY_VIEW_PARAM_ET]
 
+# Default solver
+DEFAULT_SOLVER_DICT = dict(
+    train_net=None,
+    test_net=None,
+    test_iter=15,
+    test_interval=2000,
+    base_lr=0.001,
+    lr_policy='step',
+    gamma=0.1,
+    stepsize=100000,
+    max_iter=100000,
+    display=100,
+    momentum=0.9,
+    weight_decay=0.0005,
+    snapshot=1000,
+    snapshot_prefix=None,
+    solver_mode='GPU'
+)
+
+'''
+Merge the given dictionaries and return the result.
+@args:
+    dict_args (args of type dict): The dictionaries to merge together.
+'''
+def merge_dicts(*dict_args):
+    res = dict()
+    for dict_arg in dict_args:
+        res.update(dict_arg)
+    return res
+
+'''
+Generate solver text from a dictionary.
+@args
+    d (dict): The dictionary to generate solver text from.
+'''
+def dict_to_solver_text(d, allow_empty=False):
+    ret = ''
+    for key, value in d.iteritems():
+        if value is None:
+            if allow_empty:
+                warn('Generating solver with empty parameter %s' % key)
+            else:
+                raise Exception('Solver dictionary has empty parameter %s' % key)
+        # Figure out if the value needs quotes around it. Strings generally need quotes, except for some stupid cases
+        if isinstance(value, basestring) and key not in ['solver_mode']:
+            value = '"%s"' % value
+        ret += '%s: %s\n' % (key, value)
+    return ret
+
 '''
 Create an in-place ReLU layer.
 @args
@@ -52,7 +102,7 @@ Create an in-place Dropout layer.
     dropout_ratio (float): How often to drop out the activation
 '''
 def dropout(name, bottom, dropout_ratio=DEFAULT_DROPOUT_RATIO):
-    return L.Dropout(name=name, bottom=bottom, in_place=True, dropout_param=dict(
+    return L.Dropout(name=name, bottom=bottom, top=bottom, in_place=True, dropout_param=dict(
         dropout_ratio=dropout_ratio
     ))
 
@@ -79,16 +129,6 @@ Create a LRN layer with given parameters.
 '''
 def lrn(name, bottom, lrn_param=DEFAULT_LRN_PARAM):
     return L.LRN(name=name, bottom=bottom, lrn_param=lrn_param)
-
-'''
-Create a Convolutional layer with given parameters.
-@args
-    name (str): Name of the Convolution layer.
-    bottom (str): Name of the input blob for the Convolution layer
-    conv_param (dict): The parameters for the Convolution layer
-'''
-def convolution(name, bottom, conv_param):
-    return None
 
 '''
 Augment the given network specification with a conv layer with optional activation wrappers. Layers are automatically generated based on the name of the base conv layer.
@@ -182,8 +222,6 @@ def add_loss_acc_layers(net_spec, bottom_prefixes, angle_names=DEFAULT_ANGLE_NAM
 def train_model_r4cnnpp(lmdb_paths, batch_size, crop_size=gv.g_images_resize_dim, imagenet_mean_file=gv.g_image_mean_binaryproto_file):
     train_data_lmdb_path = lmdb_paths[0]
     train_label_lmdb_path = lmdb_paths[1]
-    test_data_lmdb_path = lmdb_paths[2]
-    test_label_lmdb_path = lmdb_paths[3]
     data_transform_param = dict(
         crop_size=crop_size,
         mean_file=imagenet_mean_file,
@@ -192,11 +230,11 @@ def train_model_r4cnnpp(lmdb_paths, batch_size, crop_size=gv.g_images_resize_dim
 
     n = caffe.NetSpec()
     # Data layers
-    n['data_train'] = L.Data(name='data', batch_size=batch_size, backend=P.Data.LMDB, include=dict(phase=caffe.TRAIN), source=train_data_lmdb_path, transform_param=data_transform_param)
-    n['label_train'] = L.Data(name='label', batch_size=batch_size, backend=P.Data.LMDB, include=dict(phase=caffe.TRAIN), source=train_label_lmdb_path)
-    n['data_test'] = L.Data(name='data', batch_size=batch_size, backend=P.Data.LMDB, include=dict(phase=caffe.TEST), source=train_data_lmdb_path, transform_param=data_transform_param)
-    n['label_test'] = L.Data(name='label', batch_size=batch_size, backend=P.Data.LMDB, include=dict(phase=caffe.TEST), source =train_label_lmdb_path)
-    n['label_class'], n['label_azimuth'], n['label_elevation'], n['label_tilt'] = L.Slice(name='labe-slice', bottom='data', ntop=4, slice_param=dict(
+    # n['data'] = L.Data(name='data', batch_size=batch_size, backend=P.Data.LMDB, include=dict(phase=caffe.TRAIN), source=train_data_lmdb_path, transform_param=data_transform_param)
+    # n['label'] = L.Data(name='label', batch_size=batch_size, backend=P.Data.LMDB, include=dict(phase=caffe.TRAIN), source=train_label_lmdb_path)
+    n['data'] = L.Data(name='data', batch_size=batch_size, backend=P.Data.LMDB, source=train_data_lmdb_path, transform_param=data_transform_param)
+    n['label'] = L.Data(name='label', batch_size=batch_size, backend=P.Data.LMDB, source=train_label_lmdb_path)
+    n['label_class'], n['label_azimuth'], n['label_elevation'], n['label_tilt'] = L.Slice(name='labe-slice', bottom='label', ntop=4, slice_param=dict(
         slice_dim=1, slice_point=[1,2,3]
     ))
     n['silence-label_class'] = L.Silence(name='silence-label_class', bottom='label_class', ntop=0)
@@ -228,5 +266,29 @@ def train_model_r4cnnpp(lmdb_paths, batch_size, crop_size=gv.g_images_resize_dim
 
 
 if __name__ == '__main__':
-    model = train_model_r4cnnpp(['']*5, 192)
-    print(model)
+    # Set LMDB paths
+    train_lmdbs_root = gv.g_corresp_syn_images_lmdb_folder
+    train_lmdb_paths = [os.path.join(train_lmdbs_root, lmdb_name) for lmdb_name in ['image_lmdb', 'viewpoint_label_lmdb']]
+    test_lmdbs_root = gv.g_corresp_real_images_test_lmdb_folder
+    test_lmdb_paths = [os.path.join(test_lmdbs_root, lmdb_name) for lmdb_name in ['image_lmdb', 'viewpoint_label_lmdb']]
+
+    # Set model and solver paths
+    model_root = os.path.join(gv.g_render4cnn_root_folder, 'train', 'c_new')
+    model_train_path = os.path.join(model_root, 'syn-train.prototxt')
+    model_test_path = os.path.join(model_root, 'syn-test.prototxt')
+    solver_path = os.path.join(model_root, 'solver_syn.prototxt')
+
+    # Generate train model prototxt file
+    train_model = train_model_r4cnnpp(train_lmdb_paths, 64)
+    with open(model_train_path, 'w') as f:
+        f.write(str(train_model))
+    # Generate test model prototxt file
+    test_model = train_model_r4cnnpp(test_lmdb_paths, 64)
+    with open(model_test_path, 'w') as f:
+        f.write(str(test_model))
+
+    non_default_params = dict(train_net=model_train_path, test_net=model_test_path, snapshot_prefix='syn')
+    all_params = merge_dicts(DEFAULT_SOLVER_DICT, non_default_params)
+    solver_text = dict_to_solver_text(all_params)
+    with open(solver_path, 'w') as f:
+        f.write(solver_text)
