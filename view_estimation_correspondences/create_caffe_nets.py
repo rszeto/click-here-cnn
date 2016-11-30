@@ -1,6 +1,8 @@
 import os
 import sys
 from warnings import warn
+import tempfile
+import shutil
 
 # Import global variables
 view_estimation_correspondences_path = os.path.dirname(os.path.abspath(__file__))
@@ -218,8 +220,66 @@ def add_loss_acc_layers(net_spec, bottom_prefixes, angle_names=DEFAULT_ANGLE_NAM
         acc_name = 'accuracy_' + angle_name
         net_spec[acc_name] = L.AccuracyView(name=acc_name, bottom=bottom, accuracy_view_param=acc_param_arr[i])
 
+'''
+Get the model prototext string from a Caffe NetSpec.
+@args
+    net_spec (caffe.NetSpec): The network specification argument
+'''
+def get_prototxt_str(net_spec):
+    return str(net_spec.to_proto())
 
-def train_model_r4cnnpp(lmdb_paths, batch_size, crop_size=gv.g_images_resize_dim, imagenet_mean_file=gv.g_image_mean_binaryproto_file):
+'''
+Test the validity of the given network parameters.
+@args
+    net_param (caffe.NetParameter): The network parameters to test
+'''
+def verify_netspec(net_spec):
+    temp_file = tempfile.NamedTemporaryFile()
+    # Write prototxt to file, and flush to make sure whole prototxt is written
+    temp_file.write(str(net_spec))
+    temp_file.flush()
+    # Try to make the net. Caffe will crash everything if it fails. This cannot be caught.
+    caffe.Net(temp_file.name, caffe.TRAIN)
+
+'''
+Delete a layer from a NetParameter by its type.
+@args
+    net_param (caffe.NetParameter): The network parameter object to modify
+    type_name (str): The type of the layers to delete
+'''
+def delete_layer_by_type(net_param, type_name):
+    # Keep track of the names of deleted layers
+    deleted_layer_names = []
+    # Go through layers backwards to prevent index inconsistency
+    layers = net_param.layer._values
+    for i in reversed(range(len(layers))):
+        if layers[i].type == type_name:
+            layer = layers.pop(i)
+            deleted_layer_names.insert(0, layer.name)
+    return deleted_layer_names
+
+'''
+Create a deployment prototxt string from a NetParameter. This deletes "Data" layers and replaces them with "input" and "input_shape" fields, and deletes view softmax and accuracy layers.
+WARNING: This modifies the net_param argument. Only use this after the given NetParameter has been saved to disk.
+@args
+    net_param (caffe.NetParameter): The network parameters to generate a deploy prototxt from
+    data_shapes (dict<str, tuple>): A map from the layer name to the input shape
+'''
+def netspec_to_deploy_prototxt_str(net_param, data_shapes):
+    ret = ''
+    for name, shape in data_shapes.iteritems():
+        ret += 'input: "%s"\ninput_shape {\n' % name
+        for dim_size in shape:
+            ret += '  dim: %d\n' % dim_size
+        ret += '}\n'
+    # Delete data, softmax, and accuracy layers
+    net_param = net_param
+    for layer_type in ['Data', 'Slice', 'Silence', 'SoftmaxWithViewLoss', 'AccuracyView']:
+        delete_layer_by_type(net_param, layer_type)
+    ret += str(net_param)
+    return ret
+
+def create_model_r4cnnpp(lmdb_paths, batch_size, crop_size=gv.g_images_resize_dim, imagenet_mean_file=gv.g_image_mean_binaryproto_file):
     train_data_lmdb_path = lmdb_paths[0]
     train_label_lmdb_path = lmdb_paths[1]
     data_transform_param = dict(
@@ -230,8 +290,6 @@ def train_model_r4cnnpp(lmdb_paths, batch_size, crop_size=gv.g_images_resize_dim
 
     n = caffe.NetSpec()
     # Data layers
-    # n['data'] = L.Data(name='data', batch_size=batch_size, backend=P.Data.LMDB, include=dict(phase=caffe.TRAIN), source=train_data_lmdb_path, transform_param=data_transform_param)
-    # n['label'] = L.Data(name='label', batch_size=batch_size, backend=P.Data.LMDB, include=dict(phase=caffe.TRAIN), source=train_label_lmdb_path)
     n['data'] = L.Data(name='data', batch_size=batch_size, backend=P.Data.LMDB, source=train_data_lmdb_path, transform_param=data_transform_param)
     n['label'] = L.Data(name='label', batch_size=batch_size, backend=P.Data.LMDB, source=train_label_lmdb_path)
     n['label_class'], n['label_azimuth'], n['label_elevation'], n['label_tilt'] = L.Slice(name='labe-slice', bottom='label', ntop=4, slice_param=dict(
@@ -264,31 +322,105 @@ def train_model_r4cnnpp(lmdb_paths, batch_size, crop_size=gv.g_images_resize_dim
 
     return n.to_proto()
 
+def do_the_thing():
+    # Potential arguments
+    sub_lmdb_names = ['image_lmdb', 'viewpoint_label_lmdb']
+    model_id = 'r4cnnpp_new'
+    train_batch_size = 64
+    test_batch_size = 64
+    create_model_fn = create_model_r4cnnpp
+    input_data_shapes = {'data': (1, 3, 227, 227)}
+    # TODO: Specify different solver parameters for synthetic and real data, namely step size and max iters
+
+    # Set LMDB paths
+    syn_lmdb_paths = [os.path.join(gv.g_corresp_syn_images_lmdb_folder, lmdb_name) for lmdb_name in sub_lmdb_names]
+    real_train_lmdb_paths = [os.path.join(gv.g_corresp_real_images_train_lmdb_folder, lmdb_name) for lmdb_name in sub_lmdb_names]
+    real_test_lmdb_paths = [os.path.join(gv.g_corresp_real_images_test_lmdb_folder, lmdb_name) for lmdb_name in sub_lmdb_names]
+
+    # Define paths for solver and models for training on synthetic data
+    model_root = os.path.join(gv.g_corresp_model_root_folder, model_id)
+    model_syn_train_path = os.path.join(model_root, 'syn-train.prototxt')
+    solver_syn_path = os.path.join(model_root, 'solver_syn.prototxt')
+
+    # Define paths for solver and models for fine-tuning on real data
+    model_real_train_path = os.path.join(model_root, 'real-train.prototxt')
+    model_real_test_path = os.path.join(model_root, 'real-test.prototxt')
+    solver_real_path = os.path.join(model_root, 'solver_real.prototxt')
+
+    # Define path to deploy prototxt
+    model_deploy_path = os.path.join(model_root, 'deploy.prototxt')
+
+    # Make model root folder if it doesn't exist
+    if not os.path.exists(model_root):
+        os.makedirs(model_root)
+
+    # Save synthetic training model prototxt
+    model_syn_train = create_model_fn(syn_lmdb_paths, train_batch_size)
+    with open(model_syn_train_path, 'w') as f:
+        f.write(str(model_syn_train))
+    # Save real training model prototxt
+    model_real_train = create_model_fn(real_train_lmdb_paths, train_batch_size)
+    with open(model_real_train_path, 'w') as f:
+        f.write(str(model_real_train))
+    # Save real test model prototxt
+    model_real_test = create_model_fn(real_test_lmdb_paths, test_batch_size)
+    with open(model_real_test_path, 'w') as f:
+        f.write(str(model_real_test))
+    # Save deploy model prototxt
+    model_deploy_str = netspec_to_deploy_prototxt_str(model_syn_train, input_data_shapes)
+    with open(model_deploy_path, 'w') as f:
+        f.write(model_deploy_str)
+
+    # Save synthetic data solver parameters
+    syn_override_params = dict(train_net=model_syn_train_path, test_net=model_real_test_path, snapshot_prefix='syn')
+    syn_solver_params = merge_dicts(DEFAULT_SOLVER_DICT, syn_override_params)
+    syn_solver_str = dict_to_solver_text(syn_solver_params)
+    with open(solver_syn_path, 'w') as f:
+        f.write(syn_solver_str)
+
+    # Save real data solver parameters
+    real_override_params = dict(train_net=model_real_train_path, test_net=model_real_test_path, snapshot_prefix='real')
+    real_solver_params = merge_dicts(DEFAULT_SOLVER_DICT, real_override_params)
+    real_solver_str = dict_to_solver_text(real_solver_params)
+    with open(solver_real_path, 'w') as f:
+        f.write(real_solver_str)
+
+    # Create synthetic training and real fine-tuning training scripts
+    shutil.copy(os.path.join(gv.g_corresp_model_root_folder, 'train_model.sh'), os.path.join(model_root, 'syn.sh'))
+    shutil.copy(os.path.join(gv.g_corresp_model_root_folder, 'train_model.sh'), os.path.join(model_root, 'real.sh'))
 
 if __name__ == '__main__':
-    # Set LMDB paths
-    train_lmdbs_root = gv.g_corresp_syn_images_lmdb_folder
-    train_lmdb_paths = [os.path.join(train_lmdbs_root, lmdb_name) for lmdb_name in ['image_lmdb', 'viewpoint_label_lmdb']]
-    test_lmdbs_root = gv.g_corresp_real_images_test_lmdb_folder
-    test_lmdb_paths = [os.path.join(test_lmdbs_root, lmdb_name) for lmdb_name in ['image_lmdb', 'viewpoint_label_lmdb']]
+    do_the_thing()
 
-    # Set model and solver paths
-    model_root = os.path.join(gv.g_render4cnn_root_folder, 'train', 'c_new')
-    model_train_path = os.path.join(model_root, 'syn-train.prototxt')
-    model_test_path = os.path.join(model_root, 'syn-test.prototxt')
-    solver_path = os.path.join(model_root, 'solver_syn.prototxt')
-
-    # Generate train model prototxt file
-    train_model = train_model_r4cnnpp(train_lmdb_paths, 64)
-    with open(model_train_path, 'w') as f:
-        f.write(str(train_model))
-    # Generate test model prototxt file
-    test_model = train_model_r4cnnpp(test_lmdb_paths, 64)
-    with open(model_test_path, 'w') as f:
-        f.write(str(test_model))
-
-    non_default_params = dict(train_net=model_train_path, test_net=model_test_path, snapshot_prefix='syn')
-    all_params = merge_dicts(DEFAULT_SOLVER_DICT, non_default_params)
-    solver_text = dict_to_solver_text(all_params)
-    with open(solver_path, 'w') as f:
-        f.write(solver_text)
+    # # Set LMDB paths
+    # train_lmdbs_root = gv.g_corresp_syn_images_lmdb_folder
+    # train_lmdb_paths = [os.path.join(train_lmdbs_root, lmdb_name) for lmdb_name in ['image_lmdb', 'viewpoint_label_lmdb']]
+    # test_lmdbs_root = gv.g_corresp_real_images_test_lmdb_folder
+    # test_lmdb_paths = [os.path.join(test_lmdbs_root, lmdb_name) for lmdb_name in ['image_lmdb', 'viewpoint_label_lmdb']]
+    #
+    # # Set model and solver paths
+    # model_root = os.path.join(gv.g_corresp_model_root_folder, 'c_new')
+    # model_train_path = os.path.join(model_root, 'syn-train.prototxt')
+    # model_test_path = os.path.join(model_root, 'syn-test.prototxt')
+    # solver_path = os.path.join(model_root, 'solver_syn.prototxt')
+    # model_deploy_path = os.path.join(model_root, 'deploy.prototxt')
+    #
+    # # Generate train model prototxt file
+    # train_model = create_model_r4cnnpp(train_lmdb_paths, 64)
+    # with open(model_train_path, 'w') as f:
+    #     f.write(str(train_model))
+    # # Generate test model prototxt file
+    # test_model = create_model_r4cnnpp(test_lmdb_paths, 64)
+    # with open(model_test_path, 'w') as f:
+    #     f.write(str(test_model))
+    #
+    # non_default_params = dict(train_net=model_train_path, test_net=model_test_path, snapshot_prefix='syn')
+    # all_params = merge_dicts(DEFAULT_SOLVER_DICT, non_default_params)
+    # solver_text = dict_to_solver_text(all_params)
+    # with open(solver_path, 'w') as f:
+    #     f.write(solver_text)
+    #
+    # data_shapes = {'data': (1, 3, 227, 227)}
+    # deploy_prototxt = netspec_to_deploy_prototxt_str(train_model, data_shapes)
+    # with open(model_deploy_path, 'w') as f:
+    #     f.write(deploy_prototxt)
