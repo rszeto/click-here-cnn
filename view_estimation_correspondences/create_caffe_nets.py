@@ -233,10 +233,10 @@ Test the validity of the given network parameters.
 @args
     net_param (caffe.NetParameter): The network parameters to test
 '''
-def verify_netspec(net_spec):
+def verify_netspec(net_param):
     temp_file = tempfile.NamedTemporaryFile()
     # Write prototxt to file, and flush to make sure whole prototxt is written
-    temp_file.write(str(net_spec))
+    temp_file.write(str(net_param))
     temp_file.flush()
     # Try to make the net. Caffe will crash everything if it fails. This cannot be caught.
     caffe.Net(temp_file.name, caffe.TRAIN)
@@ -322,15 +322,119 @@ def create_model_r4cnnpp(lmdb_paths, batch_size, crop_size=gv.g_images_resize_di
 
     return n.to_proto()
 
-def do_the_thing():
+def create_model_r4cnnpp(lmdb_paths, batch_size, crop_size=gv.g_images_resize_dim, imagenet_mean_file=gv.g_image_mean_binaryproto_file):
+    data_lmdb_path = lmdb_paths[0]
+    label_lmdb_path = lmdb_paths[1]
+    data_transform_param = dict(
+        crop_size=crop_size,
+        mean_file=imagenet_mean_file,
+        mirror=False
+    )
+
+    n = caffe.NetSpec()
+    # Data layers
+    n['data'] = L.Data(name='data', batch_size=batch_size, backend=P.Data.LMDB, source=data_lmdb_path, transform_param=data_transform_param)
+    n['label'] = L.Data(name='label', batch_size=batch_size, backend=P.Data.LMDB, source=label_lmdb_path)
+    n['label_class'], n['label_azimuth'], n['label_elevation'], n['label_tilt'] = L.Slice(name='labe-slice', bottom='label', ntop=4, slice_param=dict(
+        slice_dim=1, slice_point=[1,2,3]
+    ))
+    n['silence-label_class'] = L.Silence(name='silence-label_class', bottom='label_class', ntop=0)
+
+    # Image (Render for CNN) features
+    conv1_param = dict(num_output=96, kernel_size=11, stride=4)
+    pool1_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    conv2_param = dict(num_output=256, pad=2, kernel_size=5, group=2)
+    pool2_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    conv3_param = dict(num_output=384, pad=1, kernel_size=3)
+    conv4_param = dict(num_output=384, pad=1, kernel_size=3, group=2)
+    conv5_param = dict(num_output=256, pad=1, kernel_size=3, group=2)
+    pool5_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    conv1_out_name = add_wrapped_conv_layer(n, 'conv1', 'data', conv1_param, pooling_param=pool1_param, lrn_param=DEFAULT_LRN_PARAM)
+    conv2_out_name = add_wrapped_conv_layer(n, 'conv2', conv1_out_name, conv2_param, pooling_param=pool2_param, lrn_param=DEFAULT_LRN_PARAM)
+    conv3_out_name = add_wrapped_conv_layer(n, 'conv3', conv2_out_name, conv3_param)
+    conv4_out_name = add_wrapped_conv_layer(n, 'conv4', conv3_out_name, conv4_param, param=DEFAULT_DECAY_PARAM)
+    conv5_out_name = add_wrapped_conv_layer(n, 'conv5', conv4_out_name, conv5_param, param=DEFAULT_DECAY_PARAM, pooling_param=pool5_param)
+    fc6_out_name = add_wrapped_fc_layer(n, 'fc6', conv5_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+    fc7_out_name = add_wrapped_fc_layer(n, 'fc7', fc6_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+    fc8_out_name = add_wrapped_fc_layer(n, 'fc8', fc7_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+    fc9_out_name = add_wrapped_fc_layer(n, 'fc9', fc8_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+
+    # Prediction and loss layers
+    add_prediction_layers(n, 'pred_', fc9_out_name)
+    add_loss_acc_layers(n, ['pred_', 'label_'])
+
+    return n.to_proto()
+
+def create_model_j(lmdb_paths, batch_size, crop_size=gv.g_images_resize_dim, imagenet_mean_file=gv.g_image_mean_binaryproto_file):
+    data_lmdb_path = lmdb_paths[0]
+    data_keypoint_image_lmdb_path = lmdb_paths[1]
+    data_keypoint_class_lmdb_path = lmdb_paths[2]
+    label_lmdb_path = lmdb_paths[3]
+    data_transform_param = dict(
+        crop_size=crop_size,
+        mean_file=imagenet_mean_file,
+        mirror=False
+    )
+
+    n = caffe.NetSpec()
+    # Data layers
+    n['data'] = L.Data(name='data', batch_size=batch_size, backend=P.Data.LMDB, source=data_lmdb_path, transform_param=data_transform_param)
+    n['data_keypoint_image'] = L.Data(name='data_keypoint_image', batch_size=batch_size, backend=P.Data.LMDB, source=data_keypoint_image_lmdb_path)
+    n['data_keypoint_class'] = L.Data(name='data_keypoint_class', batch_size=batch_size, backend=P.Data.LMDB, source=data_keypoint_class_lmdb_path)
+    n['label'] = L.Data(name='label', batch_size=batch_size, backend=P.Data.LMDB, source=label_lmdb_path)
+    n['label_class'], n['label_azimuth'], n['label_elevation'], n['label_tilt'] = L.Slice(name='labe-slice', bottom='label', ntop=4, slice_param=dict(
+        slice_dim=1, slice_point=[1,2,3]
+    ))
+    n['silence-label_class'] = L.Silence(name='silence-label_class', bottom='label_class', ntop=0)
+
+    # Image (Render for CNN) features
+    conv1_param = dict(num_output=96, kernel_size=11, stride=4)
+    pool1_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    conv2_param = dict(num_output=256, pad=2, kernel_size=5, group=2)
+    pool2_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    conv3_param = dict(num_output=384, pad=1, kernel_size=3)
+    conv4_param = dict(num_output=384, pad=1, kernel_size=3, group=2)
+    conv5_param = dict(num_output=256, pad=1, kernel_size=3, group=2)
+    pool5_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    conv1_out_name = add_wrapped_conv_layer(n, 'conv1', 'data', conv1_param, pooling_param=pool1_param, lrn_param=DEFAULT_LRN_PARAM)
+    conv2_out_name = add_wrapped_conv_layer(n, 'conv2', conv1_out_name, conv2_param, pooling_param=pool2_param, lrn_param=DEFAULT_LRN_PARAM)
+    conv3_out_name = add_wrapped_conv_layer(n, 'conv3', conv2_out_name, conv3_param)
+    conv4_out_name = add_wrapped_conv_layer(n, 'conv4', conv3_out_name, conv4_param, param=DEFAULT_DECAY_PARAM)
+    conv5_out_name = add_wrapped_conv_layer(n, 'conv5', conv4_out_name, conv5_param, param=DEFAULT_DECAY_PARAM, pooling_param=pool5_param)
+    fc6_out_name = add_wrapped_fc_layer(n, 'fc6', conv5_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+    fc7_out_name = add_wrapped_fc_layer(n, 'fc7', fc6_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+
+    # Keypoint image features
+    n['pool1_keypoint_image'] = L.Pooling(name='pool1_keypoint_image', bottom='data_keypoint_image', pooling_param=dict(pool=P.Pooling.MAX, kernel_size=5, stride=5))
+    n['flatten_keypoint_image'] = L.Flatten(name='flatten_keypoint_image', bottom='pool1_keypoint_image')
+
+    # Keypoint class features
+    n['flatten_keypoint_class'] = L.Flatten(name='flatten_keypoint_class', bottom='data_keypoint_class')
+
+    # Fusion
+    n['concat'] = L.Concat(name='concat', bottom=[fc7_out_name, 'flatten_keypoint_image', 'flatten_keypoint_class'])
+    fc8_out_name = add_wrapped_fc_layer(n, 'fc8', 'concat', 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+    fc9_out_name = add_wrapped_fc_layer(n, 'fc9', fc8_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+
+    # Prediction and loss layers
+    add_prediction_layers(n, 'pred_', fc9_out_name)
+    add_loss_acc_layers(n, ['pred_', 'label_'])
+
+    return n.to_proto()
+
+def main():
     # Potential arguments
-    sub_lmdb_names = ['image_lmdb', 'viewpoint_label_lmdb']
-    model_id = 'r4cnnpp_new'
+    sub_lmdb_names = ['image_lmdb', 'gaussian_keypoint_map_lmdb_23', 'keypoint_class_lmdb', 'viewpoint_label_lmdb']
+    model_id = 'j_new'
     train_batch_size = 64
     test_batch_size = 64
-    create_model_fn = create_model_r4cnnpp
+    create_model_fn = create_model_j
     input_data_shapes = {'data': (1, 3, 227, 227)}
-    # TODO: Specify different solver parameters for synthetic and real data, namely step size and max iters
+    syn_stepsize = 100000
+    syn_max_iter = 100000
+    real_stepsize = 2000
+    real_max_iter = 10000
+    verify_net = False
 
     # Set LMDB paths
     syn_lmdb_paths = [os.path.join(gv.g_corresp_syn_images_lmdb_folder, lmdb_name) for lmdb_name in sub_lmdb_names]
@@ -356,6 +460,9 @@ def do_the_thing():
 
     # Save synthetic training model prototxt
     model_syn_train = create_model_fn(syn_lmdb_paths, train_batch_size)
+    # Verify if needed
+    if verify_net:
+        verify_netspec(model_syn_train)
     with open(model_syn_train_path, 'w') as f:
         f.write(str(model_syn_train))
     # Save real training model prototxt
@@ -372,14 +479,14 @@ def do_the_thing():
         f.write(model_deploy_str)
 
     # Save synthetic data solver parameters
-    syn_override_params = dict(train_net=model_syn_train_path, test_net=model_real_test_path, snapshot_prefix='syn')
+    syn_override_params = dict(train_net=model_syn_train_path, test_net=model_real_test_path, snapshot_prefix='syn', stepsize=syn_stepsize, max_iter=syn_max_iter)
     syn_solver_params = merge_dicts(DEFAULT_SOLVER_DICT, syn_override_params)
     syn_solver_str = dict_to_solver_text(syn_solver_params)
     with open(solver_syn_path, 'w') as f:
         f.write(syn_solver_str)
 
     # Save real data solver parameters
-    real_override_params = dict(train_net=model_real_train_path, test_net=model_real_test_path, snapshot_prefix='real')
+    real_override_params = dict(train_net=model_real_train_path, test_net=model_real_test_path, snapshot_prefix='real', stepsize=real_stepsize, max_iter=real_max_iter)
     real_solver_params = merge_dicts(DEFAULT_SOLVER_DICT, real_override_params)
     real_solver_str = dict_to_solver_text(real_solver_params)
     with open(solver_real_path, 'w') as f:
@@ -390,37 +497,4 @@ def do_the_thing():
     shutil.copy(os.path.join(gv.g_corresp_model_root_folder, 'train_model.sh'), os.path.join(model_root, 'real.sh'))
 
 if __name__ == '__main__':
-    do_the_thing()
-
-    # # Set LMDB paths
-    # train_lmdbs_root = gv.g_corresp_syn_images_lmdb_folder
-    # train_lmdb_paths = [os.path.join(train_lmdbs_root, lmdb_name) for lmdb_name in ['image_lmdb', 'viewpoint_label_lmdb']]
-    # test_lmdbs_root = gv.g_corresp_real_images_test_lmdb_folder
-    # test_lmdb_paths = [os.path.join(test_lmdbs_root, lmdb_name) for lmdb_name in ['image_lmdb', 'viewpoint_label_lmdb']]
-    #
-    # # Set model and solver paths
-    # model_root = os.path.join(gv.g_corresp_model_root_folder, 'c_new')
-    # model_train_path = os.path.join(model_root, 'syn-train.prototxt')
-    # model_test_path = os.path.join(model_root, 'syn-test.prototxt')
-    # solver_path = os.path.join(model_root, 'solver_syn.prototxt')
-    # model_deploy_path = os.path.join(model_root, 'deploy.prototxt')
-    #
-    # # Generate train model prototxt file
-    # train_model = create_model_r4cnnpp(train_lmdb_paths, 64)
-    # with open(model_train_path, 'w') as f:
-    #     f.write(str(train_model))
-    # # Generate test model prototxt file
-    # test_model = create_model_r4cnnpp(test_lmdb_paths, 64)
-    # with open(model_test_path, 'w') as f:
-    #     f.write(str(test_model))
-    #
-    # non_default_params = dict(train_net=model_train_path, test_net=model_test_path, snapshot_prefix='syn')
-    # all_params = merge_dicts(DEFAULT_SOLVER_DICT, non_default_params)
-    # solver_text = dict_to_solver_text(all_params)
-    # with open(solver_path, 'w') as f:
-    #     f.write(solver_text)
-    #
-    # data_shapes = {'data': (1, 3, 227, 227)}
-    # deploy_prototxt = netspec_to_deploy_prototxt_str(train_model, data_shapes)
-    # with open(model_deploy_path, 'w') as f:
-    #     f.write(deploy_prototxt)
+    main()
