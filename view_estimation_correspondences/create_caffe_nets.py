@@ -49,7 +49,7 @@ DEFAULT_SOLVER_DICT = dict(
     gamma=0.1,
     stepsize=100000,
     max_iter=100000,
-    display=100,
+    display=20,
     momentum=0.9,
     weight_decay=0.0005,
     snapshot=1000,
@@ -267,11 +267,18 @@ WARNING: This modifies the net_param argument. Only use this after the given Net
 '''
 def netspec_to_deploy_prototxt_str(net_param, data_shapes):
     ret = ''
+    # Get data layer names
+    layers = net_param.layer._values
+    data_layer_names = [layer.name for layer in layers if layer.type == 'Data']
+    # Add input layer specification if it is in both the net parameters and the data shapes
     for name, shape in data_shapes.iteritems():
-        ret += 'input: "%s"\ninput_shape {\n' % name
-        for dim_size in shape:
-            ret += '  dim: %d\n' % dim_size
-        ret += '}\n'
+        if name in data_layer_names:
+            ret += 'input: "%s"\ninput_shape {\n' % name
+            for dim_size in shape:
+                ret += '  dim: %d\n' % dim_size
+            ret += '}\n'
+        else:
+            warn('netspec_to_deploy_prototxt_str: Skipping unavailable data layer ' + name)
     # Delete data, softmax, and accuracy layers
     net_param = net_param
     for layer_type in ['Data', 'Slice', 'Silence', 'SoftmaxWithViewLoss', 'AccuracyView']:
@@ -424,12 +431,13 @@ def create_model_j(lmdb_paths, batch_size, crop_size=gv.g_images_resize_dim, ima
 
 def main():
     # Potential arguments
+    # sub_lmdb_names = ['image_lmdb', 'viewpoint_label_lmdb']
     sub_lmdb_names = ['image_lmdb', 'gaussian_keypoint_map_lmdb_23', 'keypoint_class_lmdb', 'viewpoint_label_lmdb']
     model_id = 'j_new'
     train_batch_size = 64
     test_batch_size = 64
     create_model_fn = create_model_j
-    input_data_shapes = {'data': (1, 3, 227, 227)}
+    input_data_shapes = dict(data=(1, 3, 227, 227), data_keypoint_image=(1, 1, 227, 227), data_keypoint_class=(1, 34))
     syn_stepsize = 100000
     syn_max_iter = 100000
     real_stepsize = 2000
