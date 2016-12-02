@@ -5,7 +5,7 @@ import scipy
 import skimage
 import argparse
 import lmdb
-import pickle
+import cPickle as pickle
 import matplotlib.pyplot as plt
 import time
 
@@ -157,7 +157,7 @@ Arguments:
 - test_root: The root directory of the LMDBs for the test data. There should be LMDBs in folders called 'image_lmdb',
     'keypoint_class_lmdb', 'keypoint_loc_lmdb', and 'viewpoint_label_lmdb' under this directory
 - imagenet_mean_file: The path to the ImageNet mean .npy file
-- outputFile: Where to store the accuracy results. By default, it will not save
+- output_file: Where to store the accuracy results. By default, it will not save
 '''
 def get_model_acc(model_proto, model_weights, test_root, imagenet_mean_file=None, prediction_cache_file=None, eval_from_cache=False, blank_keypoint_img=False, blank_keypoint_class=False, use_keypoint_data=True, use_sparse_keypoint_map=True):
     ## Get data from test LMDBs
@@ -313,17 +313,17 @@ if __name__ == '__main__':
     parser.add_argument('test_root', type=str, help='The root directory of the LMDBs for the test data. There should be LMDBs in folders called \'image_lmdb\', \'keypoint_class_lmdb\', \'keypoint_loc_lmdb\', and \'viewpoint_label_lmdb\' under this directory')
     parser.add_argument('mode', type=str, help='The type of evaluation to be done. Possibilities are "correspondences", "r4cnn"')
     parser.add_argument('--imagenet_mean_file', type=str, default=gv.g_image_mean_file, help='The path to the ImageNet mean .npy file')
-    parser.add_argument('--outputFile', type=str, default=None, help='Where to store the accuracy results. By default, it will not save')
-    parser.add_argument('--predictionCacheFile', type=str, default=None, help='Where to cache the (verbose) angle predictions. By default, it will not save')
+    parser.add_argument('--output_file', type=str, default=None, help='Where to store the accuracy results. By default, it will not save')
+    parser.add_argument('--prediction_cache_file', type=str, default=None, help='Where to cache the (verbose) angle predictions. By default, it will not save')
     parser.add_argument('--eval_from_cache', dest='eval_from_cache', action='store_true', help='True if evaluations should be made from the cache file')
     parser.set_defaults(eval_from_cache=False)
 
     args = parser.parse_args()
-    class_accs, class_med_errs, keypoint_class_accs, keypoint_class_mederrs = get_model_acc(args.model_proto, args.model_weights, args.test_root, prediction_cache_file=args.predictionCacheFile, eval_from_cache=args.eval_from_cache, use_keypoint_data=(args.mode == 'correspondences'))
+    class_accs, class_med_errs, keypoint_class_accs, keypoint_class_mederrs = get_model_acc(args.model_proto, args.model_weights, args.test_root, prediction_cache_file=args.prediction_cache_file, eval_from_cache=args.eval_from_cache, use_keypoint_data=(args.mode == 'correspondences'))
 
     # Write accuracy and median error results
-    if args.outputFile:
-        f = open(args.outputFile, 'wb')
+    if args.output_file:
+        f = open(args.output_file, 'wb')
     else:
         f = sys.stdout
     f.write('Results for test set at %s\n' % args.test_root)
@@ -341,5 +341,5 @@ if __name__ == '__main__':
         f.write('%s:\n' % keypoint_class_name)
         f.write('\tAccuracy: %0.4f\n' % keypoint_class_accs[keypoint_class_name])
         f.write('\tMedErr: %0.4f\n' % keypoint_class_mederrs[keypoint_class_name])
-    if args.outputFile:
+    if args.output_file:
         f.close()
