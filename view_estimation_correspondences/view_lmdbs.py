@@ -11,8 +11,22 @@ sys.path.append(os.path.dirname(BASE_DIR))
 import gen_lmdb_utils as utils
 import global_variables as gv
 
+def getCorrespLmdbData(lmdbs_root, N):
+    # Define LMDBs
+    image_lmdb = lmdb.open(os.path.join(lmdbs_root, 'image_lmdb'), readonly=True)
+    keypoint_loc_lmdb = lmdb.open(os.path.join(lmdbs_root, 'keypoint_loc_lmdb'), readonly=True)
+    keypoint_class_lmdb = lmdb.open(os.path.join(lmdbs_root, 'keypoint_class_lmdb'), readonly=True)
+    viewpoint_label_lmdb = lmdb.open(os.path.join(lmdbs_root, 'viewpoint_label_lmdb'), readonly=True)
+
+    images_dict = utils.getFirstNLmdbImgs(image_lmdb, N)
+    keypoint_loc_dict = utils.getFirstNLmdbImgs(keypoint_loc_lmdb, N)
+    keypoint_class_dict = utils.getFirstNLmdbVecs(keypoint_class_lmdb, N)
+    viewpoint_label_dict = utils.getFirstNLmdbVecs(viewpoint_label_lmdb, N)
+
+    return images_dict.keys(), images_dict, keypoint_loc_dict, keypoint_class_dict, viewpoint_label_dict
+
 def viewCorrespLmdbs(lmdbs_root, N):
-    keys, images_dict, keypoint_loc_dict, keypoint_class_dict, viewpoint_label_dict = utils.getCorrespLmdbData(lmdbs_root, N)
+    keys, images_dict, keypoint_loc_dict, keypoint_class_dict, viewpoint_label_dict = getCorrespLmdbData(lmdbs_root, N)
 
     f, ax = plt.subplots(1, 3)
     plot_title = plt.suptitle('')
@@ -23,7 +37,7 @@ def viewCorrespLmdbs(lmdbs_root, N):
         viewpoint_label_vec = viewpoint_label_dict[key]
 
         # Create keypoint visualization
-        keypoint_loc_i, keypoint_loc_j = np.where(keypoint_loc_image == 1)
+        keypoint_loc_i, keypoint_loc_j = np.where(keypoint_loc_image != 0)
         keypoint_loc_i = keypoint_loc_i[0]
         keypoint_loc_j = keypoint_loc_j[0]
         keypoint_vis = np.zeros((gv.g_images_resize_dim, gv.g_images_resize_dim, 3), dtype=np.uint8)
@@ -64,11 +78,11 @@ def viewImageLmdbs(image_lmdb_root, N):
     images_dict = utils.getFirstNLmdbImgs(image_lmdb, N)
     keys = images_dict.keys()
 
-    f, ax = plt.subplots(1, 2)
+    f = plt.figure()
     plot_title = plt.suptitle('')
     for key in sorted(keys):
         image = images_dict[key]
-        ax[0].imshow(image)
+        plt.imshow(image, cmap='Greys_r')
 
         # Set title
         title = ''
@@ -76,8 +90,7 @@ def viewImageLmdbs(image_lmdb_root, N):
         plot_title.set_text(title)
 
         # Hide axes
-        plt.setp([a.get_xticklabels() for a in ax], visible=False)
-        plt.setp([a.get_yticklabels() for a in ax], visible=False)
+        plt.axis('off')
         plt.draw()
         plt.waitforbuttonpress()
 

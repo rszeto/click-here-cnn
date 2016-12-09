@@ -431,23 +431,25 @@ def create_model_j(lmdb_paths, batch_size, crop_size=gv.g_images_resize_dim, ima
 
 def main():
     # Potential arguments
-    # sub_lmdb_names = ['image_lmdb', 'viewpoint_label_lmdb']
-    sub_lmdb_names = ['image_lmdb', 'gaussian_keypoint_map_lmdb_23', 'keypoint_class_lmdb', 'viewpoint_label_lmdb']
-    model_id = 'j_new'
+    sub_lmdb_names = ['image_lmdb', 'viewpoint_label_lmdb']
+    model_id = 'r4cnnpp_new'
+    create_model_fn = create_model_r4cnnpp
+    # sub_lmdb_names = ['image_lmdb', 'gaussian_keypoint_map_lmdb', 'keypoint_class_lmdb', 'viewpoint_label_lmdb']
+    # model_id = 'j_new'
+    # create_model_fn = create_model_j
     train_batch_size = 64
     test_batch_size = 64
-    create_model_fn = create_model_j
     input_data_shapes = dict(data=(1, 3, 227, 227), data_keypoint_image=(1, 1, 227, 227), data_keypoint_class=(1, 34))
     syn_stepsize = 100000
     syn_max_iter = 100000
     real_stepsize = 2000
     real_max_iter = 10000
-    verify_net = False
+    verify_net = True
 
     # Set LMDB paths
-    syn_lmdb_paths = [os.path.join(gv.g_corresp_syn_images_lmdb_folder, lmdb_name) for lmdb_name in sub_lmdb_names]
-    real_train_lmdb_paths = [os.path.join(gv.g_corresp_real_images_train_lmdb_folder, lmdb_name) for lmdb_name in sub_lmdb_names]
-    real_test_lmdb_paths = [os.path.join(gv.g_corresp_real_images_test_lmdb_folder, lmdb_name) for lmdb_name in sub_lmdb_names]
+    syn_lmdb_paths = [os.path.join(gv.g_corresp_syn_lmdb_folder, lmdb_name) for lmdb_name in sub_lmdb_names]
+    real_train_lmdb_paths = [os.path.join(gv.g_corresp_real_train_lmdb_folder, lmdb_name) for lmdb_name in sub_lmdb_names]
+    real_test_lmdb_paths = [os.path.join(gv.g_corresp_real_test_lmdb_folder, lmdb_name) for lmdb_name in sub_lmdb_names]
 
     # Define paths for solver and models for training on synthetic data
     model_root = os.path.join(gv.g_corresp_model_root_folder, model_id)

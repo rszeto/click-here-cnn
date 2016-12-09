@@ -14,12 +14,16 @@ import skimage
 import time
 import multiprocessing
 from pprint import pprint
+import h5py
+import scipy.ndimage
+import itertools
+from scipy.ndimage.filters import gaussian_filter
+from scipy.misc import imsave
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(BASE_DIR)
 sys.path.append(os.path.dirname(BASE_DIR))
 import global_variables as gv
-# sys.path.append(os.path.join(BASE_DIR, '..', 'view_estimation'))
 
 sys.path.append(gv.g_pycaffe_path)
 import caffe
@@ -50,6 +54,10 @@ KEYPOINT_TYPES = {
     # 'tvmonitor': ['front_bottom_left', 'front_bottom_right', 'front_top_left', 'front_top_right', 'back_bottom_left', 'back_bottom_right', 'back_top_left', 'back_top_right']
 }
 
+CLASSNAME_SYNSET_MAP = {}
+for synset, class_name in synset_name_pairs:
+    CLASSNAME_SYNSET_MAP[class_name] = synset
+
 SYNSET_OLDCLASSIDX_MAP = {}
 for i in range(len(gv.g_shape_synset_name_pairs)):
     synset, _ = gv.g_shape_synset_name_pairs[i]
@@ -76,6 +84,7 @@ for i in range(len(KEYPOINT_CLASSES)):
 INFO_FILE_HEADER = 'imgPath,bboxTLX,bboxTLY,bboxBRX,bboxBRY,imgKeyptX,imgKeyptY,keyptClass,objClass,azimuthClass,elevationClass,rotationClass\n'
 LINE_FORMAT = re.compile('(.*),(.*),(.*),(.*),(.*),(.*),(.*),(.*),(.*),(.*),(.*),(.*)')
 DEFAULT_LMDB_SIZE = 1e13
+TXN_BATCH_SIZE = 100
 
 ######### Importing .mat files ###############################################
 ######### Reference: http://stackoverflow.com/a/8832212 ######################
@@ -119,7 +128,7 @@ def _todict(matobj):
 
 ######### Saving to LMDB #####################################################
 
-def image_to_datum(image):
+def image_to_caffe(image):
     # Convert image to weird Caffe format. Fork depending on if image is color or not.
     if image.ndim == 2:
         # If grayscale, transpose to match Caffe dim ordering
@@ -129,54 +138,21 @@ def image_to_datum(image):
         image_caffe = image[:, :, ::-1]
         # Go from H*W*C to C*H*W
         image_caffe = image_caffe.transpose(2, 0, 1)
+    return image_caffe
+
+def image_to_datum(image):
+    image_caffe = image_to_caffe(image)
     # Populate datum
     datum = caffe.proto.caffe_pb2.Datum()
     (datum.channels, datum.height, datum.width) = image_caffe.shape
     datum.data = image_caffe.tobytes()
     return datum
 
-def write_image_to_lmdb(lmdb_obj, key, image):
-    datum = image_to_datum(image)
-    # Put datum into LMDB
-    with lmdb_obj.begin(write=True) as txn:
-        txn.put(key.encode('ascii'), datum.SerializeToString())
-
 def vector_to_datum(vec):
     # Reshape vector to be in Caffe format
     vec_caffe = vec.reshape([len(vec), 1, 1])
     # Put datum into LMDB
     datum = caffe.io.array_to_datum(vec_caffe)
-    return datum
-
-def write_vec_to_lmdb(lmdb_obj, key, vec):
-    datum = vector_to_datum(vec)
-    with lmdb_obj.begin(write=True) as txn:
-        txn.put(key.encode('ascii'), datum.SerializeToString())
-
-def write_datum_to_lmdb(lmdb_obj, key, datum):
-    # Put datum into LMDB
-    with lmdb_obj.begin(write=True) as txn:
-        txn.put(key.encode('ascii'), datum.SerializeToString())
-
-'''
-@input: (full_image_path, bbox, reverse)
-    - full_image_path: The path to the full image
-    - bbox: A NumPy array of the form [tl_x, tl_y, br_x, br_y] indicating the corners of the crop, inclusive
-    - reverse: Boolean flag indicating whether to reverse the image
-'''
-def full_image_path_to_datum(args):
-    full_image_path, bbox, reverse = args
-
-    # Get the cropped image, scale it, and store it
-    full_image = imread(full_image_path)
-    # Convert grayscale images to "color"
-    if full_image.ndim == 2:
-        full_image = np.dstack((full_image, full_image, full_image))
-    cropped_image = full_image[bbox[1]:bbox[3]+1, bbox[0]:bbox[2]+1, :]
-    scaled_image = imresize(cropped_image, (gv.g_images_resize_dim, gv.g_images_resize_dim))
-    if reverse:
-        scaled_image = np.fliplr(scaled_image)
-    datum = image_to_datum(scaled_image)
     return datum
 
 ######### Loading from LMDB (for debugging) ##################################
@@ -260,6 +236,11 @@ def keypointInfo2Str(fullImagePath, bbox, keyptLoc, keyptClass, viewptLabel):
         keyptClass,
         viewptLabel[0], viewptLabel[1], viewptLabel[2], viewptLabel[3]
     )
+
+def padImage(image, pad_size, pad_value):
+    image_tr = image.transpose((2, 0, 1))
+    padded_tr = np.pad(image_tr, ((0, 0), (pad_size, pad_size), (pad_size, pad_size)), 'constant', constant_values=pad_value)
+    return padded_tr.transpose(1, 2, 0)
 
 def createSynKeypointCsv():
     if not os.path.exists(gv.g_corresp_folder):
@@ -385,305 +366,89 @@ def createPascalKeypointCsv():
     info_file_train.close()
     info_file_test.close()
 
-def appendRandomPrefix(key):
-    prefix = random.uniform(0, 1e8)
-    return '%08d_%s' % (prefix, key)
+def random_number_string(length=8):
+    value = random.uniform(0, 10**length)
+    format = '%0' + str(length) + 'd'
+    return format % value
 
 '''
-@input: (line, reverse)
-    - line: The line from the LMDB info CSV
-    - reverse: Boolean flag for whether the data should be reversed
-@output: The datum representing the scaled image
+@args
+    start (float): The start time in seconds since the epoch
 '''
-def csvLineToImageDatum(arg_tuple):
-    line, reverse = arg_tuple
-
-    # Extract info from the line
-    m = re.match(LINE_FORMAT, line)
-    full_image_path = m.group(1)
-    bbox = np.array([int(x) for x in m.group(2,3,4,5)])
-
-    # Get the cropped image and scale it
-    full_image = imread(full_image_path)
-    # Convert grayscale images to "color"
-    if full_image.ndim == 2:
-        full_image = np.dstack((full_image, full_image, full_image))
-    cropped_image = full_image[bbox[1]:bbox[3]+1, bbox[0]:bbox[2]+1, :]
-    scaled_image = imresize(cropped_image, (gv.g_images_resize_dim, gv.g_images_resize_dim))
-    # Flip the image if needed
-    if reverse:
-        scaled_image = np.fliplr(scaled_image)
-
-    # Return the datum
-    datum = image_to_datum(scaled_image)
-    return datum
-
-'''
-@input: (line, reverse)
-    - line: The line from the LMDB info CSV
-    - reverse: Boolean flag for whether the data should be reversed
-@output: The datum representing the keypoint image
-'''
-def csvLineToKeypointImageDatum(arg_tuple):
-    line, reverse = arg_tuple
-
-    # Extract info from the line
-    m = re.match(LINE_FORMAT, line)
-    full_image_path = m.group(1)
-    bbox = np.array([int(x) for x in m.group(2,3,4,5)])
-    keypoint_loc_full = np.array([float(x) for x in m.group(6,7)])
-
-    # Get bounding box dimensions
-    bbox_size = np.array([bbox[2]-bbox[0]+1, bbox[3]-bbox[1]+1])
-    # Get keypoint location inside the bounding box
-    keypoint_loc_bb = keypoint_loc_full - bbox[:2]
-    keypoint_loc_scaled = np.floor(gv.g_images_resize_dim * keypoint_loc_bb / bbox_size).astype(np.uint8)
-    # Push keypoint inside image (sometimes it ends up on edge due to float arithmetic)
-    keypoint_loc_scaled[0] = min(keypoint_loc_scaled[0], gv.g_images_resize_dim-1)
-    keypoint_loc_scaled[1] = min(keypoint_loc_scaled[1], gv.g_images_resize_dim-1)
-    # Create keypoint location image
-    keypoint_image = np.zeros((gv.g_images_resize_dim, gv.g_images_resize_dim), dtype=np.uint8)
-    keypoint_image[keypoint_loc_scaled[1], keypoint_loc_scaled[0]] = 1
-    # Flip the image if needed
-    if reverse:
-        keypoint_image = np.fliplr(keypoint_image)
-
-    # Return the datum
-    datum = image_to_datum(keypoint_image)
-    return datum
-
-'''
-@input: (line, reverse)
-    - line: The line from the LMDB info CSV
-    - reverse: Boolean flag for whether the data should be reversed
-@output: The datum representing the one-hot keypoint class vector
-'''
-def csvLineToKeypointClassDatum(arg_tuple):
-    line, reverse = arg_tuple
-
-    # Extract info from the line
-    m = re.match(LINE_FORMAT, line)
-    keypoint_class = int(m.group(8))
-
-    # Get mirror keypoint class if needed
-    if reverse:
-        keypoint_name = KEYPOINT_CLASSES[keypoint_class]
-        keypoint_name_r = keypoint_name
-        if 'left' in keypoint_name:
-            keypoint_name_r = keypoint_name.replace('left', 'right')
-        elif 'right' in keypoint_name:
-            keypoint_name_r = keypoint_name.replace('right', 'left')
-        keypoint_class = KEYPOINTCLASS_INDEX_MAP[keypoint_name_r]
-
-    # Get one-hot vector encoding of keypoint class
-    keypoint_class_vec = np.zeros(len(KEYPOINT_CLASSES), dtype=np.uint8)
-    keypoint_class_vec[keypoint_class] = 1
-
-    datum = vector_to_datum(keypoint_class_vec)
-    return datum
-
-'''
-@input: (line, reverse)
-    - line: The line from the LMDB info CSV
-    - reverse: Boolean flag for whether the data should be reversed
-@output: The datum representing the viewpoint label
-'''
-def csvLineToViewpointLabelDatum(arg_tuple):
-    line, reverse = arg_tuple
-
-    # Extract info from the line
-    m = re.match(LINE_FORMAT, line)
-    viewpoint_label = np.array([int(x) for x in m.group(9,10,11,12)])
-
-    # Save label for regular image
-    viewpoint_label_vec = viewpoint_label
-    # Get viewpoint label of flipped image if needed
-    if reverse:
-        # Extract normal azimuth and tilt
-        object_class = viewpoint_label_vec[0]
-        azimuth = viewpoint_label_vec[1]
-        tilt = viewpoint_label_vec[3]
-        # Get reversed azimuth and tilt
-        azimuth_r = np.mod(360-azimuth, 360)
-        tilt_r = np.mod(-1*tilt, 360)
-        # Update viewpoint label
-        viewpoint_label_vec[1] = view2label(azimuth_r, object_class)
-        viewpoint_label_vec[3] = view2label(tilt_r, object_class)
-
-    datum = vector_to_datum(viewpoint_label_vec)
-    return datum
-
-def createCorrespLmdbsMinor(args):
-    proc_num, minor_jobs, lmdbs_minor_root = args
-    start = time.time()
-
-    if not os.path.exists(lmdbs_minor_root):
-        os.mkdir(lmdbs_minor_root)
-
-    # Define LMDBs
-    image_lmdb = lmdb.open(os.path.join(lmdbs_minor_root, 'image_lmdb'), map_size=DEFAULT_LMDB_SIZE)
-    keypoint_loc_lmdb = lmdb.open(os.path.join(lmdbs_minor_root, 'keypoint_loc_lmdb'), map_size=DEFAULT_LMDB_SIZE)
-    keypoint_class_lmdb = lmdb.open(os.path.join(lmdbs_minor_root, 'keypoint_class_lmdb'), map_size=DEFAULT_LMDB_SIZE)
-    viewpoint_label_lmdb = lmdb.open(os.path.join(lmdbs_minor_root, 'viewpoint_label_lmdb'), map_size=DEFAULT_LMDB_SIZE)
-
-    for i, minor_job in enumerate(minor_jobs):
-        line, reversed = minor_job
-        image_datum = csvLineToImageDatum(minor_job)
-        keypoint_image_datum = csvLineToKeypointImageDatum(minor_job)
-        keypoint_class_datum = csvLineToKeypointClassDatum(minor_job)
-        viewpoint_label_datum = csvLineToViewpointLabelDatum(minor_job)
-
-        # Extract info from the line
-        m = re.match(LINE_FORMAT, line)
-        full_image_path = m.group(1)
-        # Get keys for regular and reversed instance
-        image_name = os.path.basename(full_image_path)
-        if reversed:
-            key = appendRandomPrefix(image_name + '_r')
-        else:
-            key = appendRandomPrefix(image_name)
-
-        # Write datums
-        write_datum_to_lmdb(image_lmdb, key, image_datum)
-        write_datum_to_lmdb(keypoint_loc_lmdb, key, keypoint_image_datum)
-        write_datum_to_lmdb(keypoint_class_lmdb, key, keypoint_class_datum)
-        write_datum_to_lmdb(viewpoint_label_lmdb, key, viewpoint_label_datum)
-
-        if i % 1000 == 0:
-            now = time.time()
-            elapsed_sec = now - start
-            print('Finished writing keypoint %d/%d (proc %d)' % (i, len(minor_jobs), proc_num))
-            print('Time elapsed: %ds/%.1fm/%.1fh' % (elapsed_sec, elapsed_sec / 60.0, elapsed_sec / 3600.0))
-
-'''
-TODO: Randomness cannot be seeded easily since the keys are generated in each minor call. If time, move key generation
-to major call and push the keys to the minor function
-'''
-def createCorrespLmdbsMajor(info_file_path, lmdbs_major_root, num_procs, reverse):
-    start = time.time()
-    print('Generating LMDBs from CSV')
-    print('Info file path: %s' % info_file_path)
-    print('LMDBs root: %s' % lmdbs_major_root)
-    print('Start date: %s' % time.asctime(time.localtime(start)))
-
-    if not os.path.exists(lmdbs_major_root):
-        os.mkdir(lmdbs_major_root)
-
-    # Read the data info from the file
-    with open(info_file_path) as info_file:
-        lines = info_file.readlines()
-    # Remove header row
-    lines = lines[1:]
-
-    # Define functions to go from line to argument tuples
-    line_to_arg_tuple = lambda l: (l, False)
-    line_to_arg_tuple_r = lambda l: (l, True)
-    # Generate all jobs
-    if reverse:
-        l2at_fs = (line_to_arg_tuple, line_to_arg_tuple_r)
-        all_minor_jobs = [f(line) for line in lines for f in l2at_fs]
-    else:
-        all_minor_jobs = [line_to_arg_tuple(line) for line in lines]
-    # Randomize the jobs across processors
-    random.shuffle(all_minor_jobs)
-
-    # Divide the minor jobs among the processors
-    num_jobs_per_proc = len(all_minor_jobs) / num_procs
-    remainder = len(all_minor_jobs) % num_procs
-    divided_minor_jobs = []
-    for i in range(num_procs):
-        if i < remainder:
-            minor_jobs = all_minor_jobs[i*num_jobs_per_proc+i:(i+1)*num_jobs_per_proc+i+1]
-        else:
-            minor_jobs = all_minor_jobs[i*num_jobs_per_proc+remainder:(i+1)*num_jobs_per_proc+remainder]
-        divided_minor_jobs.append((i, minor_jobs, os.path.join(lmdbs_major_root, str(i))))
-
-    p = multiprocessing.Pool(num_procs)
-    p.map(createCorrespLmdbsMinor, divided_minor_jobs)
-
+def print_elapsed_time(start):
     now = time.time()
     elapsed_sec = now - start
-    print('End date: %s' % time.asctime(time.localtime(now)))
     print('Time elapsed: %ds/%.1fm/%.1fh' % (elapsed_sec, elapsed_sec / 60.0, elapsed_sec / 3600.0))
 
-def createCorrespLmdbs(info_file_path, lmdbs_root, reverse):
+def create_image_lmdb(image_data_root, image_lmdb_root, keys):
     start = time.time()
-    print('Generating LMDBs from CSV')
-    print('Info file path: %s' % info_file_path)
-    print('LMDBs root: %s' % lmdbs_root)
-    print('Start date: %s' % time.asctime(time.localtime(start)))
 
-    if not os.path.exists(lmdbs_root):
-        os.mkdir(lmdbs_root)
+    # Get image paths and make sure they exist
+    paths = [os.path.join(image_data_root, key + '.png') for key in keys]
+    for path in paths:
+        if not os.path.exists(path):
+            print('Could not find path "%s", quitting' % path)
+            return
 
-    # Read the data info from the file
-    with open(info_file_path) as info_file:
-        lines = info_file.readlines()
-    # Remove header row
-    lines = lines[1:]
+    # Open image LMDB
+    if not os.path.exists(image_lmdb_root):
+        os.makedirs(image_lmdb_root)
+    image_lmdb = lmdb.open(image_lmdb_root, map_size=DEFAULT_LMDB_SIZE)
+    image_lmdb_name = os.path.basename(image_lmdb_root)
 
-    # Define functions to go from line to argument tuples
-    line_to_arg_tuple = lambda l: (l, False)
-    line_to_arg_tuple_r = lambda l: (l, True)
-    # Generate all jobs
-    if reverse:
-        l2at_fs = (line_to_arg_tuple, line_to_arg_tuple_r)
-        all_jobs = [f(line) for line in lines for f in l2at_fs]
-    else:
-        all_jobs = [line_to_arg_tuple(line) for line in lines]
-    # Randomize the jobs
-    random.shuffle(all_jobs)
+    # Save images in batch transactions
+    num_batches = int(np.ceil(len(paths) / float(TXN_BATCH_SIZE)))
+    for i in range(num_batches):
+        start_idx = i * TXN_BATCH_SIZE
+        end_idx = min((i+1) * TXN_BATCH_SIZE, len(paths))
+        with image_lmdb.begin(write=True) as txn:
+            for path in paths[start_idx:end_idx]:
+                full_path = os.path.join(image_data_root, path)
+                image = imread(full_path)
+                datum = image_to_datum(image)
+                key, _ = os.path.splitext(os.path.basename(path))
+                txn.put(key.encode('ascii'), datum.SerializeToString())
+        # Print progress every 10 batches
+        if i % 10 == 0:
+            print('%s: Committed batch %d/%d' % (image_lmdb_name, i+1, num_batches))
+            print_elapsed_time(start)
 
-    # Define LMDBs
-    image_lmdb = lmdb.open(os.path.join(lmdbs_root, 'image_lmdb'), map_size=DEFAULT_LMDB_SIZE)
-    keypoint_loc_lmdb = lmdb.open(os.path.join(lmdbs_root, 'keypoint_loc_lmdb'), map_size=DEFAULT_LMDB_SIZE)
-    keypoint_class_lmdb = lmdb.open(os.path.join(lmdbs_root, 'keypoint_class_lmdb'), map_size=DEFAULT_LMDB_SIZE)
-    viewpoint_label_lmdb = lmdb.open(os.path.join(lmdbs_root, 'viewpoint_label_lmdb'), map_size=DEFAULT_LMDB_SIZE)
+    # Print completion info
+    print('Finished creating %s' % image_lmdb_name)
+    print_elapsed_time(start)
 
-    for i, job in enumerate(all_jobs):
-        line, reversed = job
-        image_datum = csvLineToImageDatum(job)
-        keypoint_image_datum = csvLineToKeypointImageDatum(job)
-        keypoint_class_datum = csvLineToKeypointClassDatum(job)
-        viewpoint_label_datum = csvLineToViewpointLabelDatum(job)
+def create_vector_lmdb(vector_data_root, vector_lmdb_root, keys):
+    start = time.time()
 
-        # Extract info from the line
-        m = re.match(LINE_FORMAT, line)
-        full_image_path = m.group(1)
-        # Get keys for regular and reversed instance
-        image_name = os.path.basename(full_image_path)
-        if reversed:
-            key = appendRandomPrefix(image_name + '_r')
-        else:
-            key = appendRandomPrefix(image_name)
+    # Get vector paths and make sure they exist
+    paths = [os.path.join(vector_data_root, key + '.npy') for key in keys]
+    for path in paths:
+        if not os.path.exists(path):
+            print('Could not find path "%s", quitting' % path)
+            return
 
-        # Write datums
-        write_datum_to_lmdb(image_lmdb, key, image_datum)
-        write_datum_to_lmdb(keypoint_loc_lmdb, key, keypoint_image_datum)
-        write_datum_to_lmdb(keypoint_class_lmdb, key, keypoint_class_datum)
-        write_datum_to_lmdb(viewpoint_label_lmdb, key, viewpoint_label_datum)
+    # Open vector LMDB
+    if not os.path.exists(vector_lmdb_root):
+        os.makedirs(vector_lmdb_root)
+    vector_lmdb = lmdb.open(vector_lmdb_root, map_size=DEFAULT_LMDB_SIZE)
+    vector_lmdb_name = os.path.basename(vector_lmdb_root)
 
-        if i % 1000 == 0:
-            now = time.time()
-            elapsed_sec = now - start
-            print('Finished writing keypoint %d/%d' % (i, len(all_jobs)))
-            print('Time elapsed: %ds/%.1fm/%.1fh' % (elapsed_sec, elapsed_sec / 60.0, elapsed_sec / 3600.0))
+    # Save vectors in batch transactions
+    num_batches = int(np.ceil(len(paths) / float(TXN_BATCH_SIZE)))
+    for i in range(num_batches):
+        start_idx = i * TXN_BATCH_SIZE
+        end_idx = min((i+1) * TXN_BATCH_SIZE, len(paths))
+        with vector_lmdb.begin(write=True) as txn:
+            for path in paths[start_idx:end_idx]:
+                full_path = os.path.join(vector_data_root, path)
+                vector = np.load(full_path)
+                datum = vector_to_datum(vector)
+                key, _ = os.path.splitext(os.path.basename(path))
+                txn.put(key.encode('ascii'), datum.SerializeToString())
+        # Print progress every 10 batches
+        if i % 10 == 0:
+            print('%s: Committed batch %d/%d' % (vector_lmdb_name, i+1, num_batches))
 
-    now = time.time()
-    elapsed_sec = now - start
-    print('End date: %s' % time.asctime(time.localtime(now)))
-    print('Time elapsed: %ds/%.1fm/%.1fh' % (elapsed_sec, elapsed_sec / 60.0, elapsed_sec / 3600.0))
-
-def getCorrespLmdbData(lmdbs_root, N):
-    # Define LMDBs
-    image_lmdb = lmdb.open(os.path.join(lmdbs_root, 'image_lmdb'), readonly=True)
-    keypoint_loc_lmdb = lmdb.open(os.path.join(lmdbs_root, 'keypoint_loc_lmdb'), readonly=True)
-    keypoint_class_lmdb = lmdb.open(os.path.join(lmdbs_root, 'keypoint_class_lmdb'), readonly=True)
-    viewpoint_label_lmdb = lmdb.open(os.path.join(lmdbs_root, 'viewpoint_label_lmdb'), readonly=True)
-
-    images_dict = getFirstNLmdbImgs(image_lmdb, N)
-    keypoint_loc_dict = getFirstNLmdbImgs(keypoint_loc_lmdb, N)
-    keypoint_class_dict = getFirstNLmdbVecs(keypoint_class_lmdb, N)
-    viewpoint_label_dict = getFirstNLmdbVecs(viewpoint_label_lmdb, N)
-
-    return images_dict.keys(), images_dict, keypoint_loc_dict, keypoint_class_dict, viewpoint_label_dict
+    # Print completion info
+    print('Finished creating %s' % vector_lmdb_name)
+    print_elapsed_time(start)

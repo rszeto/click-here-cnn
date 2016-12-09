@@ -21,3 +21,4 @@ caffe_models/*.zip
 *deformed*
 experiments
 *\.idea*
+caffe-r4cnn/
