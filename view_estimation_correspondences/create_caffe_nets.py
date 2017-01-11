@@ -3,6 +3,7 @@ import sys
 from warnings import warn
 import tempfile
 import shutil
+from collections import OrderedDict
 
 # Import global variables
 view_estimation_correspondences_path = os.path.dirname(os.path.abspath(__file__))
@@ -23,6 +24,7 @@ train_models_root_path = os.path.join(gv.g_render4cnn_root_folder, 'train')
 # Define common fillers and parameters
 DEFAULT_LRN_PARAM = dict(local_size=5, alpha=0.0001, beta=0.75)
 DEFAULT_DECAY_PARAM = [dict(decay_mult=1), dict(decay_mult=0)]
+HIGHER_LR_MULT_PARAM = [dict(lr_mult=10, decay_mult=1), dict(decay_mult=0)]
 DEFAULT_WEIGHT_FILLER = dict(type='gaussian', std=0.01)
 DEFAULT_BIAS_FILLER = dict(type='constant', value=0)
 DEFAULT_DROPOUT_RATIO = 0.5
@@ -44,7 +46,7 @@ DEFAULT_SOLVER_DICT = dict(
     test_net=None,
     test_iter=15,
     test_interval=2000,
-    base_lr=0.001,
+    base_lr=0.0001,
     lr_policy='step',
     gamma=0.1,
     stepsize=100000,
@@ -117,8 +119,8 @@ Create an InnerProduct (FC) layer with given filler and decay parameters.
     weight_filler (dict): The parameters for the weight filler
     bias_filler (dict): The parameters of the bias filler
 '''
-def innerproduct(name, bottom, num_output, weight_filler=DEFAULT_WEIGHT_FILLER, bias_filler=DEFAULT_BIAS_FILLER):
-    return L.InnerProduct(name=name, bottom=bottom, param=DEFAULT_DECAY_PARAM, inner_product_param=dict(
+def innerproduct(name, bottom, num_output, param, weight_filler=DEFAULT_WEIGHT_FILLER, bias_filler=DEFAULT_BIAS_FILLER):
+    return L.InnerProduct(name=name, bottom=bottom, param=param, inner_product_param=dict(
         num_output=num_output, weight_filler=weight_filler, bias_filler=bias_filler
     ))
 
@@ -131,6 +133,27 @@ Create a LRN layer with given parameters.
 '''
 def lrn(name, bottom, lrn_param=DEFAULT_LRN_PARAM):
     return L.LRN(name=name, bottom=bottom, lrn_param=lrn_param)
+
+'''
+Augment the given network specification with a split layer with given input and output
+@args
+    net_spec (caffe.NetSpec): The network specification to augment
+    bottom (str): Name of the input blob for the layer
+    top (list of str): List of output blob names
+'''
+def add_split_layer(net_spec, bottom, top):
+    net_spec[top[0]] = L.Split(bottom=bottom, top=top[1:])
+
+'''
+Augment the given network specification with a slice layer with given input and output
+@args
+    net_spec (caffe.NetSpec): The network specification to augment
+    bottom (str): Name of the input blob for the layer
+    top (list of str): List of output blob names
+    slice_param (dict): The slice parameters
+'''
+def add_slice_layer(net_spec, bottom, top, slice_param):
+    net_spec[top[0]] = L.Slice(bottom=bottom, top=top[1:], slice_param=slice_param)
 
 '''
 Augment the given network specification with a conv layer with optional activation wrappers. Layers are automatically generated based on the name of the base conv layer.
@@ -175,9 +198,9 @@ The wrappers are generated in order and named as follows: fc## -> relu## -> drop
     use_relu (bool): Whether to apply ReLU activation to the base FC layer
     dropout_ratio (float): The dropout ratio, if desired
 '''
-def add_wrapped_fc_layer(net_spec, name, bottom, num_output, use_relu=True, dropout_ratio=-1):
+def add_wrapped_fc_layer(net_spec, name, bottom, num_output, param=DEFAULT_DECAY_PARAM, use_relu=True, dropout_ratio=-1):
     assert(name[:2] == 'fc')
-    net_spec[name] = innerproduct(name, bottom, num_output)
+    net_spec[name] = innerproduct(name, bottom, num_output, param)
     if use_relu:
         relu_name = name.replace('fc', 'relu')
         net_spec[relu_name] = relu(relu_name, name)
@@ -195,10 +218,10 @@ Augment the given network specification with prediction layers.
     num_output (int): The number of outputs for each prediction layer
     angle_names (str): The names of the angles to predict
 '''
-def add_prediction_layers(net_spec, name_prefix, bottom, num_output=4320, angle_names=DEFAULT_ANGLE_NAMES):
+def add_prediction_layers(net_spec, name_prefix, bottom, num_output=4320, param=DEFAULT_DECAY_PARAM, angle_names=DEFAULT_ANGLE_NAMES):
     for angle_name in angle_names:
         pred_name = name_prefix + angle_name
-        net_spec[pred_name] = innerproduct(pred_name, bottom, num_output)
+        net_spec[pred_name] = innerproduct(pred_name, bottom, num_output, param)
 
 '''
 Augment the given network specification with loss and accuracy layers.
@@ -259,6 +282,19 @@ def delete_layer_by_type(net_param, type_name):
     return deleted_layer_names
 
 '''
+Delete a layer from a NetParameter by its name.
+@args
+    net_param (caffe.NetParameter): The network parameter object to modify
+    layer_name (str): The name of the layer to delete
+'''
+def delete_layer_by_name(net_param, layer_name):
+    layers = net_param.layer._values
+    for i in range(len(layers)):
+        if layers[i].name == layer_name:
+            layers.pop(i)
+            return
+
+'''
 Create a deployment prototxt string from a NetParameter. This deletes "Data" layers and replaces them with "input" and "input_shape" fields, and deletes view softmax and accuracy layers.
 WARNING: This modifies the net_param argument. Only use this after the given NetParameter has been saved to disk.
 @args
@@ -281,12 +317,14 @@ def netspec_to_deploy_prototxt_str(net_param, data_shapes):
             warn('netspec_to_deploy_prototxt_str: Skipping unavailable data layer ' + name)
     # Delete data, softmax, and accuracy layers
     net_param = net_param
-    for layer_type in ['Data', 'Slice', 'Silence', 'SoftmaxWithViewLoss', 'AccuracyView']:
+    for layer_type in ['Data', 'Silence', 'SoftmaxWithViewLoss', 'AccuracyView']:
         delete_layer_by_type(net_param, layer_type)
+    # Delete label slice layer
+    delete_layer_by_name(net_param, 'labe-slice')
     ret += str(net_param)
     return ret
 
-def create_model_r4cnnpp(lmdb_paths, batch_size, crop_size=gv.g_images_resize_dim, imagenet_mean_file=gv.g_image_mean_binaryproto_file):
+def create_model_r4cnn(lmdb_paths, batch_size, crop_size=gv.g_images_resize_dim, imagenet_mean_file=gv.g_image_mean_binaryproto_file):
     train_data_lmdb_path = lmdb_paths[0]
     train_label_lmdb_path = lmdb_paths[1]
     data_transform_param = dict(
@@ -320,12 +358,10 @@ def create_model_r4cnnpp(lmdb_paths, batch_size, crop_size=gv.g_images_resize_di
     conv5_out_name = add_wrapped_conv_layer(n, 'conv5', conv4_out_name, conv5_param, param=DEFAULT_DECAY_PARAM, pooling_param=pool5_param)
     fc6_out_name = add_wrapped_fc_layer(n, 'fc6', conv5_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
     fc7_out_name = add_wrapped_fc_layer(n, 'fc7', fc6_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
-    fc8_out_name = add_wrapped_fc_layer(n, 'fc8', fc7_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
-    fc9_out_name = add_wrapped_fc_layer(n, 'fc9', fc8_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
 
     # Prediction and loss layers
-    add_prediction_layers(n, 'pred_', fc9_out_name)
-    add_loss_acc_layers(n, ['pred_', 'label_'])
+    add_prediction_layers(n, 'fc-', fc7_out_name)
+    add_loss_acc_layers(n, ['fc-', 'label_'])
 
     return n.to_proto()
 
@@ -429,22 +465,298 @@ def create_model_j(lmdb_paths, batch_size, crop_size=gv.g_images_resize_dim, ima
 
     return n.to_proto()
 
+def create_model_o(lmdb_paths, batch_size):
+    fc7_lmdb_path = lmdb_paths[0]
+    conv3_cols_lmdb_path = lmdb_paths[1]
+    label_lmdb_path = lmdb_paths[2]
+
+    n = caffe.NetSpec()
+    # Data layers
+    n['fc7'] = L.Data(name='fc7', batch_size=batch_size, backend=P.Data.LMDB, source=fc7_lmdb_path)
+    n['fc7_flatten'] = L.Flatten(name='fc7_flatten', bottom='fc7')
+    n['conv3_cols'] = L.Data(name='conv3_cols', batch_size=batch_size, backend=P.Data.LMDB, source=conv3_cols_lmdb_path)
+    n['label'] = L.Data(name='label', batch_size=batch_size, backend=P.Data.LMDB, source=label_lmdb_path)
+    n['label_class'], n['label_azimuth'], n['label_elevation'], n['label_tilt'] = L.Slice(name='labe-slice', bottom='label', ntop=4, slice_param=dict(
+        slice_dim=1, slice_point=[1,2,3]
+    ))
+    n['silence-label_class'] = L.Silence(name='silence-label_class', bottom='label_class', ntop=0)
+
+    # Conv3 features
+    fc1_out_name = add_wrapped_fc_layer(n, 'fc1', 'conv3_cols', 384, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+    fc2_out_name = add_wrapped_fc_layer(n, 'fc2', fc1_out_name, 384, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+
+    # Fusion
+    n['concat'] = L.Concat(name='concat', bottom=['fc7_flatten', fc2_out_name])
+    fc8_out_name = add_wrapped_fc_layer(n, 'fc8', 'concat', 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+    fc9_out_name = add_wrapped_fc_layer(n, 'fc9', fc8_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+
+    # Prediction and loss layers
+    add_prediction_layers(n, 'pred_', fc9_out_name)
+    add_loss_acc_layers(n, ['pred_', 'label_'])
+
+    return n.to_proto()
+
+def create_model_p(lmdb_paths, batch_size):
+    fc7_lmdb_path = lmdb_paths[0]
+    conv4_cols_lmdb_path = lmdb_paths[1]
+    label_lmdb_path = lmdb_paths[2]
+
+    n = caffe.NetSpec()
+    # Data layers
+    n['fc7'] = L.Data(name='fc7', batch_size=batch_size, backend=P.Data.LMDB, source=fc7_lmdb_path)
+    n['fc7_flatten'] = L.Flatten(name='fc7_flatten', bottom='fc7')
+    n['conv4_cols'] = L.Data(name='conv4_cols', batch_size=batch_size, backend=P.Data.LMDB, source=conv4_cols_lmdb_path)
+    n['label'] = L.Data(name='label', batch_size=batch_size, backend=P.Data.LMDB, source=label_lmdb_path)
+    n['label_class'], n['label_azimuth'], n['label_elevation'], n['label_tilt'] = L.Slice(name='labe-slice', bottom='label', ntop=4, slice_param=dict(
+        slice_dim=1, slice_point=[1,2,3]
+    ))
+    n['silence-label_class'] = L.Silence(name='silence-label_class', bottom='label_class', ntop=0)
+
+    # conv4 features
+    fc1_out_name = add_wrapped_fc_layer(n, 'fc1', 'conv4_cols', 384, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+    fc2_out_name = add_wrapped_fc_layer(n, 'fc2', fc1_out_name, 384, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+
+    # Fusion
+    n['concat'] = L.Concat(name='concat', bottom=['fc7_flatten', fc2_out_name])
+    fc8_out_name = add_wrapped_fc_layer(n, 'fc8', 'concat', 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+    fc9_out_name = add_wrapped_fc_layer(n, 'fc9', fc8_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+
+    # Prediction and loss layers
+    add_prediction_layers(n, 'pred_', fc9_out_name)
+    add_loss_acc_layers(n, ['pred_', 'label_'])
+
+    return n.to_proto()
+
+def create_model_q(lmdb_paths, batch_size):
+    fc7_lmdb_path = lmdb_paths[0]
+    pool5_cols_lmdb_path = lmdb_paths[1]
+    label_lmdb_path = lmdb_paths[2]
+
+    n = caffe.NetSpec()
+    # Data layers
+    n['fc7'] = L.Data(name='fc7', batch_size=batch_size, backend=P.Data.LMDB, source=fc7_lmdb_path)
+    n['fc7_flatten'] = L.Flatten(name='fc7_flatten', bottom='fc7')
+    n['pool5_cols'] = L.Data(name='pool5_cols', batch_size=batch_size, backend=P.Data.LMDB, source=pool5_cols_lmdb_path)
+    n['label'] = L.Data(name='label', batch_size=batch_size, backend=P.Data.LMDB, source=label_lmdb_path)
+    n['label_class'], n['label_azimuth'], n['label_elevation'], n['label_tilt'] = L.Slice(name='labe-slice', bottom='label', ntop=4, slice_param=dict(
+        slice_dim=1, slice_point=[1,2,3]
+    ))
+    n['silence-label_class'] = L.Silence(name='silence-label_class', bottom='label_class', ntop=0)
+
+    # pool5 features
+    fc1_out_name = add_wrapped_fc_layer(n, 'fc1', 'pool5_cols', 384, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+    fc2_out_name = add_wrapped_fc_layer(n, 'fc2', fc1_out_name, 384, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+
+    # Fusion
+    n['concat'] = L.Concat(name='concat', bottom=['fc7_flatten', fc2_out_name])
+    fc8_out_name = add_wrapped_fc_layer(n, 'fc8', 'concat', 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+    fc9_out_name = add_wrapped_fc_layer(n, 'fc9', fc8_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+
+    # Prediction and loss layers
+    add_prediction_layers(n, 'pred_', fc9_out_name)
+    add_loss_acc_layers(n, ['pred_', 'label_'])
+
+    return n.to_proto()
+
+def create_model_r(lmdb_paths, batch_size):
+    pool5_weighted_lmdb_path = lmdb_paths[0]
+    label_lmdb_path = lmdb_paths[1]
+
+    n = caffe.NetSpec()
+    # Data layers
+    n['pool5_weighted'] = L.Data(name='pool5_weighted', batch_size=batch_size, backend=P.Data.LMDB, source=pool5_weighted_lmdb_path)
+    n['label'] = L.Data(name='label', batch_size=batch_size, backend=P.Data.LMDB, source=label_lmdb_path)
+    n['label_class'], n['label_azimuth'], n['label_elevation'], n['label_tilt'] = L.Slice(name='labe-slice', bottom='label', ntop=4, slice_param=dict(
+        slice_dim=1, slice_point=[1,2,3]
+    ))
+    n['silence-label_class'] = L.Silence(name='silence-label_class', bottom='label_class', ntop=0)
+
+    # FC layers
+    fc6_out_name = add_wrapped_fc_layer(n, 'fc6', 'pool5_weighted', 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+    fc7_out_name = add_wrapped_fc_layer(n, 'fc7', fc6_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+
+    # Prediction and loss layers
+    add_prediction_layers(n, 'pred_', fc7_out_name)
+    add_loss_acc_layers(n, ['pred_', 'label_'])
+
+    return n.to_proto()
+
+def create_model_r2(lmdb_paths, batch_size, crop_size=gv.g_images_resize_dim, imagenet_mean_file=gv.g_image_mean_binaryproto_file):
+    train_data_lmdb_path = lmdb_paths[0]
+    pool5_weight_maps_lmdb_path = lmdb_paths[1]
+    train_label_lmdb_path = lmdb_paths[2]
+    data_transform_param = dict(
+        crop_size=crop_size,
+        mean_file=imagenet_mean_file,
+        mirror=False
+    )
+
+    n = caffe.NetSpec()
+    # Data layers
+    n['data'] = L.Data(name='data', batch_size=batch_size, backend=P.Data.LMDB, source=train_data_lmdb_path, transform_param=data_transform_param)
+    n['pool5_weight_map'] = L.Data(name='pool5_weight_map', batch_size=batch_size, backend=P.Data.LMDB, source=pool5_weight_maps_lmdb_path)
+    n['label'] = L.Data(name='label', batch_size=batch_size, backend=P.Data.LMDB, source=train_label_lmdb_path)
+    n['label_class'], n['label_azimuth'], n['label_elevation'], n['label_tilt'] = L.Slice(name='labe-slice', bottom='label', ntop=4, slice_param=dict(
+        slice_dim=1, slice_point=[1,2,3]
+    ))
+    n['silence-label_class'] = L.Silence(name='silence-label_class', bottom='label_class', ntop=0)
+
+    # Image (Render for CNN) features
+    conv1_param = dict(num_output=96, kernel_size=11, stride=4)
+    pool1_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    conv2_param = dict(num_output=256, pad=2, kernel_size=5, group=2)
+    pool2_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    conv3_param = dict(num_output=384, pad=1, kernel_size=3)
+    conv4_param = dict(num_output=384, pad=1, kernel_size=3, group=2)
+    conv5_param = dict(num_output=256, pad=1, kernel_size=3, group=2)
+    pool5_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    pool5_weighted_param = dict(operation=P.Eltwise.PROD)
+    conv1_out_name = add_wrapped_conv_layer(n, 'conv1', 'data', conv1_param, pooling_param=pool1_param, lrn_param=DEFAULT_LRN_PARAM)
+    conv2_out_name = add_wrapped_conv_layer(n, 'conv2', conv1_out_name, conv2_param, pooling_param=pool2_param, lrn_param=DEFAULT_LRN_PARAM)
+    conv3_out_name = add_wrapped_conv_layer(n, 'conv3', conv2_out_name, conv3_param)
+    conv4_out_name = add_wrapped_conv_layer(n, 'conv4', conv3_out_name, conv4_param, param=DEFAULT_DECAY_PARAM)
+    conv5_out_name = add_wrapped_conv_layer(n, 'conv5', conv4_out_name, conv5_param, param=DEFAULT_DECAY_PARAM, pooling_param=pool5_param)
+
+    # Get pool5 weighted features. First, slice channels
+    add_slice_layer(n, 'pool5', ['pool5_slice_' + str(i) for i in range(256)], dict(
+        axis=1, slice_point=range(1, 256)
+    ))
+    # Then weigh each channel by the map
+    for i in range(256):
+        slice_bottom_name = 'pool5_slice_' + str(i)
+        top_name = 'pool5_weighted_' + str(i)
+        n[top_name] = L.Eltwise(name=top_name, bottom=[slice_bottom_name, 'pool5_weight_map'], eltwise_param=pool5_weighted_param)
+    # Finally, combine weighted maps
+    n['pool5_weighted'] = L.Concat(name='pool5_weighted', bottom=['pool5_weighted_' + str(i) for i in range(256)])
+
+    # FC features
+    fc6_out_name = add_wrapped_fc_layer(n, 'fc6_new', 'pool5_weighted', 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+    fc7_out_name = add_wrapped_fc_layer(n, 'fc7_new', fc6_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+
+    # Prediction and loss layers
+    add_prediction_layers(n, 'pred_', fc7_out_name)
+    add_loss_acc_layers(n, ['pred_', 'label_'])
+
+    return n.to_proto()
+
+def create_model_s(lmdb_paths, batch_size, crop_size=gv.g_images_resize_dim, imagenet_mean_file=gv.g_image_mean_binaryproto_file):
+    train_data_lmdb_path = lmdb_paths[0]
+    pool5_weight_maps_lmdb_path = lmdb_paths[1]
+    train_label_lmdb_path = lmdb_paths[2]
+    data_transform_param = dict(
+        crop_size=crop_size,
+        mean_file=imagenet_mean_file,
+        mirror=False
+    )
+
+    n = caffe.NetSpec()
+    # Data layers
+    n['data'] = L.Data(name='data', batch_size=batch_size, backend=P.Data.LMDB, source=train_data_lmdb_path, transform_param=data_transform_param)
+    n['pool5_weight_map'] = L.Data(name='pool5_weight_map', batch_size=batch_size, backend=P.Data.LMDB, source=pool5_weight_maps_lmdb_path)
+    n['label'] = L.Data(name='label', batch_size=batch_size, backend=P.Data.LMDB, source=train_label_lmdb_path)
+    n['label_class'], n['label_azimuth'], n['label_elevation'], n['label_tilt'] = L.Slice(name='labe-slice', bottom='label', ntop=4, slice_param=dict(
+        slice_dim=1, slice_point=[1,2,3]
+    ))
+    n['silence-label_class'] = L.Silence(name='silence-label_class', bottom='label_class', ntop=0)
+
+    # Parameters
+    conv1_param = dict(num_output=96, kernel_size=11, stride=4)
+    pool1_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    conv2_param = dict(num_output=256, pad=2, kernel_size=5, group=2)
+    pool2_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    conv3_param = dict(num_output=384, pad=1, kernel_size=3)
+    conv4_param = dict(num_output=384, pad=1, kernel_size=3, group=2)
+    conv5_param = dict(num_output=256, pad=1, kernel_size=3, group=2)
+    pool5_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    pool5_weighted_param = dict(operation=P.Eltwise.PROD)
+    fc7_sum_param = dict(operation=P.Eltwise.SUM)
+
+    # Image (Render for CNN) features
+    conv1_out_name = add_wrapped_conv_layer(n, 'conv1', 'data', conv1_param, pooling_param=pool1_param, lrn_param=DEFAULT_LRN_PARAM)
+    conv2_out_name = add_wrapped_conv_layer(n, 'conv2', conv1_out_name, conv2_param, pooling_param=pool2_param, lrn_param=DEFAULT_LRN_PARAM)
+    conv3_out_name = add_wrapped_conv_layer(n, 'conv3', conv2_out_name, conv3_param)
+    conv4_out_name = add_wrapped_conv_layer(n, 'conv4', conv3_out_name, conv4_param, param=DEFAULT_DECAY_PARAM)
+    conv5_out_name = add_wrapped_conv_layer(n, 'conv5', conv4_out_name, conv5_param, param=DEFAULT_DECAY_PARAM, pooling_param=pool5_param)
+    fc6_out_name = add_wrapped_fc_layer(n, 'fc6', conv5_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+    fc7_out_name = add_wrapped_fc_layer(n, 'fc7', fc6_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+
+    # Get pool5 weighted features. First, slice channels
+    add_slice_layer(n, 'pool5', ['pool5_slice_' + str(i) for i in range(256)], dict(
+        axis=1, slice_point=range(1, 256)
+    ))
+    # Then weigh each channel by the map
+    for i in range(256):
+        slice_bottom_name = 'pool5_slice_' + str(i)
+        top_name = 'pool5_weighted_' + str(i)
+        n[top_name] = L.Eltwise(name=top_name, bottom=[slice_bottom_name, 'pool5_weight_map'], eltwise_param=pool5_weighted_param)
+    # Finally, combine weighted maps
+    n['pool5_weighted'] = L.Concat(name='pool5_weighted', bottom=['pool5_weighted_' + str(i) for i in range(256)])
+    # Add FC features from weighted features
+    fc6_a_out_name = add_wrapped_fc_layer(n, 'fc6-a', 'pool5_weighted', 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+    fc7_a_out_name = add_wrapped_fc_layer(n, 'fc7-a', fc6_a_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+
+    # Combined FC7 features
+    n['fc7-sum'] = L.Eltwise(name='fc7-sum', bottom=[fc7_out_name, fc7_a_out_name], eltwise_param=fc7_sum_param)
+    # Prediction and loss layers
+    add_prediction_layers(n, 'pred_', 'fc7-sum')
+    add_loss_acc_layers(n, ['pred_', 'label_'])
+
+    return n.to_proto()
+
+
 def main():
     # Potential arguments
-    sub_lmdb_names = ['image_lmdb', 'viewpoint_label_lmdb']
-    model_id = 'r4cnnpp_new'
-    create_model_fn = create_model_r4cnnpp
+    # sub_lmdb_names = ['image_lmdb', 'viewpoint_label_lmdb']
+    # model_id = 'r4cnn'
+    # create_model_fn = create_model_r4cnn
+    # input_data_shapes = dict(data=(1, 3, 227, 227))
+
+    # sub_lmdb_names = ['image_lmdb', 'viewpoint_label_lmdb']
+    # model_id = 'r4cnnpp_new_blah'
+    # create_model_fn = create_model_r4cnnpp
+
     # sub_lmdb_names = ['image_lmdb', 'gaussian_keypoint_map_lmdb', 'keypoint_class_lmdb', 'viewpoint_label_lmdb']
     # model_id = 'j_new'
     # create_model_fn = create_model_j
-    train_batch_size = 64
-    test_batch_size = 64
-    input_data_shapes = dict(data=(1, 3, 227, 227), data_keypoint_image=(1, 1, 227, 227), data_keypoint_class=(1, 34))
+
+    # sub_lmdb_names = ['fc7_lmdb', 'conv3_cols_lmdb', 'viewpoint_label_lmdb']
+    # model_id = 'o'
+    # create_model_fn = create_model_o
+
+    # sub_lmdb_names = ['fc7_lmdb', 'conv4_cols_lmdb', 'viewpoint_label_lmdb']
+    # model_id = 'p'
+    # create_model_fn = create_model_p
+
+    # sub_lmdb_names = ['fc7_lmdb', 'pool5_cols_lmdb', 'viewpoint_label_lmdb']
+    # model_id = 'q'
+    # create_model_fn = create_model_q
+
+    # sub_lmdb_names = ['pool5_weighted_lmdb', 'viewpoint_label_lmdb']
+    # model_id = 'r'
+    # create_model_fn = create_model_r
+    # input_data_shapes = dict(pool5_weighted=(1, 6, 6, 256))
+
+    sub_lmdb_names = ['image_lmdb', 'pool5_weight_maps_lmdb', 'viewpoint_label_lmdb']
+    model_id = 'r2'
+    create_model_fn = create_model_r2
+    input_data_shapes = dict(data=(1, 3, 227, 227), pool5_weight_map=(1, 1, 6, 6))
+
+    # sub_lmdb_names = ['image_lmdb', 'pool5_weight_maps_lmdb', 'viewpoint_label_lmdb']
+    # model_id = 's'
+    # create_model_fn = create_model_s
+    # input_data_shapes = dict(data=(1, 3, 227, 227), pool5_weight_map=(1, 1, 6, 6))
+
+
+    train_batch_size = 192
+    test_batch_size = 192
+    # input_data_shapes = dict(data=(1, 3, 227, 227), data_keypoint_image=(1, 1, 227, 227), data_keypoint_class=(1, 34), data_pool5=(1, 256))
+    # input_data_shapes = dict(fc7=(1, 4096), conv3_cols=(1, 384), conv4_cols=(1, 384), pool5_cols=(1, 256))
     syn_stepsize = 100000
     syn_max_iter = 100000
     real_stepsize = 2000
     real_max_iter = 10000
-    verify_net = True
+    real_test_interval = 1000
+    verify_net = False
 
     # Set LMDB paths
     syn_lmdb_paths = [os.path.join(gv.g_corresp_syn_lmdb_folder, lmdb_name) for lmdb_name in sub_lmdb_names]
@@ -470,9 +782,6 @@ def main():
 
     # Save synthetic training model prototxt
     model_syn_train = create_model_fn(syn_lmdb_paths, train_batch_size)
-    # Verify if needed
-    if verify_net:
-        verify_netspec(model_syn_train)
     with open(model_syn_train_path, 'w') as f:
         f.write(str(model_syn_train))
     # Save real training model prototxt
@@ -488,15 +797,32 @@ def main():
     with open(model_deploy_path, 'w') as f:
         f.write(model_deploy_str)
 
+    # Verify if needed
+    if verify_net:
+        verify_netspec(model_real_test)
+
     # Save synthetic data solver parameters
-    syn_override_params = dict(train_net=model_syn_train_path, test_net=model_real_test_path, snapshot_prefix='syn', stepsize=syn_stepsize, max_iter=syn_max_iter)
+    syn_override_params = dict(
+        train_net=model_syn_train_path,
+        test_net=model_real_test_path,
+        snapshot_prefix='syn',
+        stepsize=syn_stepsize,
+        max_iter=syn_max_iter
+    )
     syn_solver_params = merge_dicts(DEFAULT_SOLVER_DICT, syn_override_params)
     syn_solver_str = dict_to_solver_text(syn_solver_params)
     with open(solver_syn_path, 'w') as f:
         f.write(syn_solver_str)
 
     # Save real data solver parameters
-    real_override_params = dict(train_net=model_real_train_path, test_net=model_real_test_path, snapshot_prefix='real', stepsize=real_stepsize, max_iter=real_max_iter)
+    real_override_params = dict(
+        train_net=model_real_train_path,
+        test_net=model_real_test_path,
+        snapshot_prefix='real',
+        stepsize=real_stepsize,
+        max_iter=real_max_iter,
+        test_interval=real_test_interval
+    )
     real_solver_params = merge_dicts(DEFAULT_SOLVER_DICT, real_override_params)
     real_solver_str = dict_to_solver_text(real_solver_params)
     with open(solver_real_path, 'w') as f:

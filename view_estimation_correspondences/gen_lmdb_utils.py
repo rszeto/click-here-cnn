@@ -155,6 +155,11 @@ def vector_to_datum(vec):
     datum = caffe.io.array_to_datum(vec_caffe)
     return datum
 
+def tensor_to_datum(tensor):
+    if tensor.ndim == 2:
+        tensor = tensor[np.newaxis, :, :]
+    return caffe.io.array_to_datum(tensor)
+
 ######### Loading from LMDB (for debugging) ##################################
 
 def lmdbStrToImage(lmdbStr):
@@ -189,6 +194,7 @@ def _getFirstNLmdbX(lmdb_obj, N, X):
     with lmdb_obj.begin() as txn:
         # Warn if N is greater than number of pairs in LMDB
         maxN = txn.stat()['entries']
+        print maxN
         if N > maxN:
             warn('Only %d values in LMDB, obtaining all' % maxN)
 
@@ -442,6 +448,8 @@ def create_vector_lmdb(vector_data_root, vector_lmdb_root, keys):
             for path in paths[start_idx:end_idx]:
                 full_path = os.path.join(vector_data_root, path)
                 vector = np.load(full_path)
+                if vector.dtype == np.float32:
+                    vector = vector.astype(np.float)
                 datum = vector_to_datum(vector)
                 key, _ = os.path.splitext(os.path.basename(path))
                 txn.put(key.encode('ascii'), datum.SerializeToString())
@@ -452,3 +460,111 @@ def create_vector_lmdb(vector_data_root, vector_lmdb_root, keys):
     # Print completion info
     print('Finished creating %s' % vector_lmdb_name)
     print_elapsed_time(start)
+
+def create_tensor_lmdb(tensor_data_root, tensor_lmdb_root, keys):
+    start = time.time()
+
+    # Get tensor paths and make sure they exist
+    paths = [os.path.join(tensor_data_root, key + '.npy') for key in keys]
+    for path in paths:
+        if not os.path.exists(path):
+            print('Could not find path "%s", quitting' % path)
+            return
+
+    # Open tensor LMDB
+    if not os.path.exists(tensor_lmdb_root):
+        os.makedirs(tensor_lmdb_root)
+    tensor_lmdb = lmdb.open(tensor_lmdb_root, map_size=DEFAULT_LMDB_SIZE)
+    tensor_lmdb_name = os.path.basename(tensor_lmdb_root)
+
+    # Save tensors in batch transactions
+    num_batches = int(np.ceil(len(paths) / float(TXN_BATCH_SIZE)))
+    for i in range(num_batches):
+        start_idx = i * TXN_BATCH_SIZE
+        end_idx = min((i+1) * TXN_BATCH_SIZE, len(paths))
+        with tensor_lmdb.begin(write=True) as txn:
+            for path in paths[start_idx:end_idx]:
+                full_path = os.path.join(tensor_data_root, path)
+                tensor = np.load(full_path)
+                if tensor.dtype == np.float32:
+                    tensor = tensor.astype(np.float)
+                datum = tensor_to_datum(tensor)
+                key, _ = os.path.splitext(os.path.basename(path))
+                txn.put(key.encode('ascii'), datum.SerializeToString())
+        # Print progress every 10 batches
+        if i % 10 == 0:
+            print('%s: Committed batch %d/%d' % (tensor_lmdb_name, i+1, num_batches))
+
+    # Print completion info
+    print('Finished creating %s' % tensor_lmdb_name)
+    print_elapsed_time(start)
+
+def batch_predict(model_deploy_file, model_params_file, batch_size, input_data, output_keys, mean_file=None, resize_dim=0):
+    # Get LMDB keys from the first input type
+    first_data = input_data[input_data.keys()[0]]
+    lmdb_keys = first_data.keys()
+
+    # set imagenet_mean
+    if mean_file is None:
+        imagenet_mean = np.array([104, 117, 123])
+    else:
+        imagenet_mean = np.load(mean_file)
+        net_parameter = caffe_pb2.NetParameter()
+        text_format.Merge(open(model_deploy_file, 'r').read(), net_parameter)
+        print net_parameter
+        print net_parameter.input_dim, imagenet_mean.shape
+        ratio = resize_dim * 1.0 / imagenet_mean.shape[1]
+        imagenet_mean = scipy.ndimage.zoom(imagenet_mean, (1, ratio, ratio))
+
+    # INIT NETWORK - NEW CAFFE VERSION
+    net = caffe.Net(model_deploy_file, model_params_file, caffe.TEST)
+    # Initialize transformer for the image data
+    transformer = caffe.io.Transformer({'data': net.blobs['data'].data.shape})
+    transformer.set_transpose('data', (2, 0, 1))  # height*width*channel -> channel*height*width
+    transformer.set_mean('data', imagenet_mean)  #### subtract mean ####
+    transformer.set_raw_scale('data', 255)  # pixel value range
+    transformer.set_channel_swap('data', (2, 1, 0))  # RGB -> BGR
+
+    # set test batch size
+    for data_layer_name in input_data.keys():
+        data_blob_shape = list(net.blobs[data_layer_name].data.shape)
+        net.blobs[data_layer_name].reshape(batch_size, *data_blob_shape[1:])
+
+    ## BATCH PREDICTS
+    batch_num = int(np.ceil(len(lmdb_keys) / float(batch_size)))
+    outputs = [[] for _ in range(len(output_keys))]
+    for k in range(batch_num):
+        start_idx = batch_size * k
+        end_idx = min(batch_size * (k + 1), len(lmdb_keys))
+        print 'batch: %d/%d, idx: %d to %d' % (k+1, batch_num, start_idx, end_idx)
+
+        # prepare batch input data
+        batch_data = {}
+        for data_layer_name in input_data.keys():
+            batch_data[data_layer_name] = []
+        # iterate through instances
+        for key in lmdb_keys[start_idx:end_idx]:
+            # iterate through input layers
+            for data_layer_name in input_data.keys():
+                data = input_data[data_layer_name][key]
+                # Transform data if needed
+                if data_layer_name in transformer.inputs.keys():
+                    data = transformer.preprocess(data_layer_name, data)
+                batch_data[data_layer_name].append(data)
+
+        # If the batch size doesn't divide the data nicely, this is needed to fill up the last batch
+        for j in range(batch_size - (end_idx - start_idx)):
+            for data_layer_name in input_data.keys():
+                batch_data[data_layer_name].append(batch_data[data_layer_name][-1])
+
+        # forward pass
+        for data_layer_name, data in batch_data.iteritems():
+            net.blobs[data_layer_name].data[...] = data
+        out = net.forward()
+
+        # extract activations
+        for i, key in enumerate(output_keys):
+            batch_outputs = out[output_keys[i]]
+            for j in range(end_idx - start_idx):
+                outputs[i].append(np.array(np.squeeze(batch_outputs[j, :])))
+    return outputs

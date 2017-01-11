@@ -1,0 +1,45 @@
+#PBS -j oe
+#PBS -l walltime=50:00:00
+#PBS -l nodes=lgn1.eecs.umich.edu:ppn=1:gpus=1
+#PBS -S /bin/bash
+#PBS -m abe
+#PBS -M szetor@umich.edu
+#PBS -v MODEL_NAME,MODE,INITIAL_WEIGHTS
+
+if [ -z $MODEL_NAME ]; then
+	echo "Error: MODEL_NAME undefined"
+	exit 1
+elif [ -z $MODE ]; then
+	echo "Error: MODE undefined"
+	exit 1
+elif [ -z $INITIAL_WEIGHTS ]; then
+	echo "Error: INITIAL_WEIGHTS undefined"
+	exit 1
+fi
+
+# Warn if NONE weights are specified (i.e. intentionally train from scratch)
+if [ "$INITIAL_WEIGHTS" = "NONE" ]; then
+	echo "Warning: Training from scratch"
+fi
+
+# Automatically defined variables used for training and log generation
+MODELS_ROOT="/z/home/szetor/Documents/DENSO_VCA/RenderForCNN/train"
+CAFFE="/z/home/szetor/sw/caffe-r4cnn/bin/caffe"
+LOG_DIR_NAME="temp_$MODE"
+MODEL_ROOT_DIR="$MODELS_ROOT/$MODEL_NAME"
+SNAPSHOT_DIR="$MODEL_ROOT_DIR/snapshots"
+TEMP_DIR="$MODEL_ROOT_DIR/$LOG_DIR_NAME"
+
+# Train and generate logs
+module load cuda cudnn opencv gflags glog boost
+mkdir -p "$SNAPSHOT_DIR"
+mkdir -p "$TEMP_DIR"
+cd "$SNAPSHOT_DIR"
+
+if [ "$INITIAL_WEIGHTS" = "NONE" ]; then
+	$CAFFE train --solver="$MODEL_ROOT_DIR/solver_$MODE.prototxt" \
+			2>&1 | tee "$TEMP_DIR/$LOG_DIR_NAME.log"
+else
+	$CAFFE train --solver="$MODEL_ROOT_DIR/solver_$MODE.prototxt" --weights="$INITIAL_WEIGHTS" \
+			2>&1 | tee "$TEMP_DIR/$LOG_DIR_NAME.log"
+fi

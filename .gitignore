@@ -22,3 +22,4 @@ caffe_models/*.zip
 experiments
 *\.idea*
 caffe-r4cnn/
+pbs_scripts/

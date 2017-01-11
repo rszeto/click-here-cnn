@@ -38,6 +38,7 @@ def plotLosses(args):
     ax.set_xlabel('Number of iterations')
     ax.set_ylabel('Loss')
     ax.legend(loc='center left', bbox_to_anchor=(1, 0.5))
+    ax.set_ylim([0, 120])
     # Save figure if specified
     if savePath:
         plt.savefig(os.path.join(savePath, 'trainLoss.png'))
@@ -76,6 +77,7 @@ def plotLosses(args):
     ax.set_xlabel('Number of iterations')
     ax.set_ylabel('Loss')
     ax.legend(loc='center left', bbox_to_anchor=(1, 0.5))
+    ax.set_ylim([0, 120])
     # Save figure if specified
     if savePath:
         plt.savefig(os.path.join(savePath, 'testLoss.png'))
@@ -93,8 +95,9 @@ def plotLosses(args):
     # Add labels
     ax.set_title(savePath + '\nTesting accuracy vs. iterations')
     ax.set_xlabel('Number of iterations')
-    ax.set_ylabel('Loss')
+    ax.set_ylabel('Sum of accuracies')
     ax.legend(loc='center left', bbox_to_anchor=(1, 0.5))
+    ax.set_ylim([0, 2.5])
     # Save figure if specified
     if savePath:
         plt.savefig(os.path.join(savePath, 'testAcc.png'))
