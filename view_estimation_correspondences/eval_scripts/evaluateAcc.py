@@ -25,8 +25,8 @@ import caffe
 from caffe.proto import caffe_pb2
 from google.protobuf import text_format
 
-MAX_NUM_EXAMPLES = 500
-# MAX_NUM_EXAMPLES = 1e6
+# MAX_NUM_EXAMPLES = 500
+MAX_NUM_EXAMPLES = 1e6
 BATCH_SIZE = 192
 
 ### END IMPORTS ###
@@ -95,12 +95,6 @@ def batch_predict(model_deploy_file, model_params_file, batch_size, input_data, 
 
     # INIT NETWORK - NEW CAFFE VERSION
     net = caffe.Net(model_deploy_file, model_params_file, caffe.TEST)
-    # Initialize transformer for the image data
-    transformer = caffe.io.Transformer({'data': net.blobs['data'].data.shape})
-    transformer.set_transpose('data', (2, 0, 1))  # height*width*channel -> channel*height*width
-    transformer.set_mean('data', imagenet_mean)  #### subtract mean ####
-    transformer.set_raw_scale('data', 255)  # pixel value range
-    transformer.set_channel_swap('data', (2, 1, 0))  # RGB -> BGR
 
     # set test batch size
     for data_layer_name in input_data.keys():
@@ -124,9 +118,10 @@ def batch_predict(model_deploy_file, model_params_file, batch_size, input_data, 
             # iterate through input layers
             for data_layer_name in input_data.keys():
                 data = input_data[data_layer_name][key]
-                # Transform data if needed
-                if data_layer_name in transformer.inputs.keys():
-                    data = transformer.preprocess(data_layer_name, data)
+                # If data is a real image, subtract ImageNet mean
+                if data_layer_name == 'data':
+                    # Cast to float in order to allow negative values
+                    data = data.astype(np.float32) - imagenet_mean
                 batch_data[data_layer_name].append(data)
 
         # If the batch size doesn't divide the data nicely, this is needed to fill up the last batch
@@ -157,7 +152,7 @@ Arguments:
 - imagenet_mean_file: The path to the ImageNet mean .npy file
 - output_file: Where to store the accuracy results. By default, it will not save
 '''
-def get_model_acc(model_proto, model_weights, test_root, imagenet_mean_file=None, prediction_cache_file=None, eval_from_cache=False, blank_keypoint_img=False, blank_keypoint_class=False, use_keypoint_data=True, use_sparse_keypoint_map=True):
+def get_model_acc(model_proto, model_weights, test_root, imagenet_mean_file=gv.g_image_mean_file, prediction_cache_file=None, eval_from_cache=False, blank_keypoint_img=False, blank_keypoint_class=False, use_keypoint_data=True, use_sparse_keypoint_map=True):
     ## Get data from test LMDBs
     # Images
     image_lmdb = lmdb.open(os.path.join(test_root, 'image_lmdb'), readonly=True)
@@ -242,7 +237,7 @@ def get_model_acc(model_proto, model_weights, test_root, imagenet_mean_file=None
 
     return class_accs, class_med_errs, keypoint_class_accs, keypoint_class_mederrs
 
-def get_model_acc2(lmdb_tuples, model_proto, model_weights, test_root, output_keys, imagenet_mean_file=None, prediction_cache_file=None, eval_from_cache=False):
+def get_model_acc2(lmdb_tuples, model_proto, model_weights, test_root, output_keys, imagenet_mean_file=gv.g_image_mean_file, prediction_cache_file=None, eval_from_cache=False):
     '''
     lmdb_tuples (arr): Array where each entry is a triple (input_name, lmdb_name, is_image_data), where
         - input_name is the input blob name
@@ -264,7 +259,7 @@ def get_model_acc2(lmdb_tuples, model_proto, model_weights, test_root, output_ke
             label_data = utils.getFirstNLmdbVecs(cur_lmdb, MAX_NUM_EXAMPLES)
         else:
             if is_image_data:
-                input_data[input_name] = utils.getFirstNLmdbImgs(cur_lmdb, MAX_NUM_EXAMPLES)
+                input_data[input_name] = utils.getFirstNLmdbCaffeImgs(cur_lmdb, MAX_NUM_EXAMPLES)
             else:
                 input_data[input_name] = utils.getFirstNLmdbVecs(cur_lmdb, MAX_NUM_EXAMPLES)
                 # Hack

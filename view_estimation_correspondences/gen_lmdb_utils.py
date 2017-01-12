@@ -162,20 +162,31 @@ def tensor_to_datum(tensor):
 
 ######### Loading from LMDB (for debugging) ##################################
 
+def caffe_to_image(image_caffe):
+    # Change C*H*W to H*W*C
+    image = image_caffe.transpose((1, 2, 0))
+    # Squeeze extra dimension if grayscale
+    image = image.squeeze()
+    # Change BGR to RGB if image is in color
+    if image.ndim == 3:
+        image = image[:, :, ::-1]
+    return image
+
 def lmdbStrToImage(lmdbStr):
     # Get datum from LMDB
     datum = caffe.proto.caffe_pb2.Datum()
     datum.ParseFromString(lmdbStr)
     # Retrieve image in weird Caffe format
-    img = caffe.io.datum_to_array(datum)
-    # Change C*H*W to H*W*C
-    img = img.transpose((1, 2, 0))
-    # Squeeze extra dimension if grayscale
-    img = img.squeeze()
-    # Change BGR to RGB if image is in color
-    if img.ndim == 3:
-        img = img[:, :, ::-1]
-    return img
+    caffe_image = caffe.io.datum_to_array(datum)
+    return caffe_to_image(caffe_image)
+
+def lmdbStrToCaffeImage(lmdbStr):
+    # Get datum from LMDB
+    datum = caffe.proto.caffe_pb2.Datum()
+    datum.ParseFromString(lmdbStr)
+    # Retrieve image in weird Caffe format
+    caffe_image = caffe.io.datum_to_array(datum)
+    return caffe_image
 
 # Adapted from Render For CNN's caffe_utils function load_vector_from_lmdb
 def lmdbStrToVec(lmdbStr):
@@ -210,6 +221,9 @@ def _getFirstNLmdbX(lmdb_obj, N, X):
 
 def getFirstNLmdbImgs(lmdb_obj, N):
     return _getFirstNLmdbX(lmdb_obj, N, lmdbStrToImage)
+
+def getFirstNLmdbCaffeImgs(lmdb_obj, N):
+    return _getFirstNLmdbX(lmdb_obj, N, lmdbStrToCaffeImage)
 
 def getFirstNLmdbVecs(lmdb_obj, N):
     return _getFirstNLmdbX(lmdb_obj, N, lmdbStrToVec)
