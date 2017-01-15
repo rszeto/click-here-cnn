@@ -97,7 +97,7 @@ def plotLosses(args):
     ax.set_xlabel('Number of iterations')
     ax.set_ylabel('Sum of accuracies')
     ax.legend(loc='center left', bbox_to_anchor=(1, 0.5))
-    ax.set_ylim([0, 2.5])
+    ax.set_ylim([0, 3])
     # Save figure if specified
     if savePath:
         plt.savefig(os.path.join(savePath, 'testAcc.png'))

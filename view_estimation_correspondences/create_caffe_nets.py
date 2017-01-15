@@ -408,180 +408,7 @@ def create_model_r4cnnpp(lmdb_paths, batch_size, crop_size=gv.g_images_resize_di
 
     return n.to_proto()
 
-def create_model_j(lmdb_paths, batch_size, crop_size=gv.g_images_resize_dim, imagenet_mean_file=gv.g_image_mean_binaryproto_file):
-    data_lmdb_path = lmdb_paths[0]
-    data_keypoint_image_lmdb_path = lmdb_paths[1]
-    data_keypoint_class_lmdb_path = lmdb_paths[2]
-    label_lmdb_path = lmdb_paths[3]
-    data_transform_param = dict(
-        crop_size=crop_size,
-        mean_file=imagenet_mean_file,
-        mirror=False
-    )
-
-    n = caffe.NetSpec()
-    # Data layers
-    n['data'] = L.Data(name='data', batch_size=batch_size, backend=P.Data.LMDB, source=data_lmdb_path, transform_param=data_transform_param)
-    n['data_keypoint_image'] = L.Data(name='data_keypoint_image', batch_size=batch_size, backend=P.Data.LMDB, source=data_keypoint_image_lmdb_path)
-    n['data_keypoint_class'] = L.Data(name='data_keypoint_class', batch_size=batch_size, backend=P.Data.LMDB, source=data_keypoint_class_lmdb_path)
-    n['label'] = L.Data(name='label', batch_size=batch_size, backend=P.Data.LMDB, source=label_lmdb_path)
-    n['label_class'], n['label_azimuth'], n['label_elevation'], n['label_tilt'] = L.Slice(name='labe-slice', bottom='label', ntop=4, slice_param=dict(
-        slice_dim=1, slice_point=[1,2,3]
-    ))
-    n['silence-label_class'] = L.Silence(name='silence-label_class', bottom='label_class', ntop=0)
-
-    # Image (Render for CNN) features
-    conv1_param = dict(num_output=96, kernel_size=11, stride=4)
-    pool1_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
-    conv2_param = dict(num_output=256, pad=2, kernel_size=5, group=2)
-    pool2_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
-    conv3_param = dict(num_output=384, pad=1, kernel_size=3)
-    conv4_param = dict(num_output=384, pad=1, kernel_size=3, group=2)
-    conv5_param = dict(num_output=256, pad=1, kernel_size=3, group=2)
-    pool5_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
-    conv1_out_name = add_wrapped_conv_layer(n, 'conv1', 'data', conv1_param, pooling_param=pool1_param, lrn_param=DEFAULT_LRN_PARAM)
-    conv2_out_name = add_wrapped_conv_layer(n, 'conv2', conv1_out_name, conv2_param, pooling_param=pool2_param, lrn_param=DEFAULT_LRN_PARAM)
-    conv3_out_name = add_wrapped_conv_layer(n, 'conv3', conv2_out_name, conv3_param)
-    conv4_out_name = add_wrapped_conv_layer(n, 'conv4', conv3_out_name, conv4_param, param=DEFAULT_DECAY_PARAM)
-    conv5_out_name = add_wrapped_conv_layer(n, 'conv5', conv4_out_name, conv5_param, param=DEFAULT_DECAY_PARAM, pooling_param=pool5_param)
-    fc6_out_name = add_wrapped_fc_layer(n, 'fc6', conv5_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
-    fc7_out_name = add_wrapped_fc_layer(n, 'fc7', fc6_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
-
-    # Keypoint image features
-    n['pool1_keypoint_image'] = L.Pooling(name='pool1_keypoint_image', bottom='data_keypoint_image', pooling_param=dict(pool=P.Pooling.MAX, kernel_size=5, stride=5))
-    n['flatten_keypoint_image'] = L.Flatten(name='flatten_keypoint_image', bottom='pool1_keypoint_image')
-
-    # Keypoint class features
-    n['flatten_keypoint_class'] = L.Flatten(name='flatten_keypoint_class', bottom='data_keypoint_class')
-
-    # Fusion
-    n['concat'] = L.Concat(name='concat', bottom=[fc7_out_name, 'flatten_keypoint_image', 'flatten_keypoint_class'])
-    fc8_out_name = add_wrapped_fc_layer(n, 'fc8', 'concat', 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
-    fc9_out_name = add_wrapped_fc_layer(n, 'fc9', fc8_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
-
-    # Prediction and loss layers
-    add_prediction_layers(n, 'pred_', fc9_out_name)
-    add_loss_acc_layers(n, ['pred_', 'label_'])
-
-    return n.to_proto()
-
-def create_model_o(lmdb_paths, batch_size):
-    fc7_lmdb_path = lmdb_paths[0]
-    conv3_cols_lmdb_path = lmdb_paths[1]
-    label_lmdb_path = lmdb_paths[2]
-
-    n = caffe.NetSpec()
-    # Data layers
-    n['fc7'] = L.Data(name='fc7', batch_size=batch_size, backend=P.Data.LMDB, source=fc7_lmdb_path)
-    n['fc7_flatten'] = L.Flatten(name='fc7_flatten', bottom='fc7')
-    n['conv3_cols'] = L.Data(name='conv3_cols', batch_size=batch_size, backend=P.Data.LMDB, source=conv3_cols_lmdb_path)
-    n['label'] = L.Data(name='label', batch_size=batch_size, backend=P.Data.LMDB, source=label_lmdb_path)
-    n['label_class'], n['label_azimuth'], n['label_elevation'], n['label_tilt'] = L.Slice(name='labe-slice', bottom='label', ntop=4, slice_param=dict(
-        slice_dim=1, slice_point=[1,2,3]
-    ))
-    n['silence-label_class'] = L.Silence(name='silence-label_class', bottom='label_class', ntop=0)
-
-    # Conv3 features
-    fc1_out_name = add_wrapped_fc_layer(n, 'fc1', 'conv3_cols', 384, dropout_ratio=DEFAULT_DROPOUT_RATIO)
-    fc2_out_name = add_wrapped_fc_layer(n, 'fc2', fc1_out_name, 384, dropout_ratio=DEFAULT_DROPOUT_RATIO)
-
-    # Fusion
-    n['concat'] = L.Concat(name='concat', bottom=['fc7_flatten', fc2_out_name])
-    fc8_out_name = add_wrapped_fc_layer(n, 'fc8', 'concat', 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
-    fc9_out_name = add_wrapped_fc_layer(n, 'fc9', fc8_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
-
-    # Prediction and loss layers
-    add_prediction_layers(n, 'pred_', fc9_out_name)
-    add_loss_acc_layers(n, ['pred_', 'label_'])
-
-    return n.to_proto()
-
-def create_model_p(lmdb_paths, batch_size):
-    fc7_lmdb_path = lmdb_paths[0]
-    conv4_cols_lmdb_path = lmdb_paths[1]
-    label_lmdb_path = lmdb_paths[2]
-
-    n = caffe.NetSpec()
-    # Data layers
-    n['fc7'] = L.Data(name='fc7', batch_size=batch_size, backend=P.Data.LMDB, source=fc7_lmdb_path)
-    n['fc7_flatten'] = L.Flatten(name='fc7_flatten', bottom='fc7')
-    n['conv4_cols'] = L.Data(name='conv4_cols', batch_size=batch_size, backend=P.Data.LMDB, source=conv4_cols_lmdb_path)
-    n['label'] = L.Data(name='label', batch_size=batch_size, backend=P.Data.LMDB, source=label_lmdb_path)
-    n['label_class'], n['label_azimuth'], n['label_elevation'], n['label_tilt'] = L.Slice(name='labe-slice', bottom='label', ntop=4, slice_param=dict(
-        slice_dim=1, slice_point=[1,2,3]
-    ))
-    n['silence-label_class'] = L.Silence(name='silence-label_class', bottom='label_class', ntop=0)
-
-    # conv4 features
-    fc1_out_name = add_wrapped_fc_layer(n, 'fc1', 'conv4_cols', 384, dropout_ratio=DEFAULT_DROPOUT_RATIO)
-    fc2_out_name = add_wrapped_fc_layer(n, 'fc2', fc1_out_name, 384, dropout_ratio=DEFAULT_DROPOUT_RATIO)
-
-    # Fusion
-    n['concat'] = L.Concat(name='concat', bottom=['fc7_flatten', fc2_out_name])
-    fc8_out_name = add_wrapped_fc_layer(n, 'fc8', 'concat', 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
-    fc9_out_name = add_wrapped_fc_layer(n, 'fc9', fc8_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
-
-    # Prediction and loss layers
-    add_prediction_layers(n, 'pred_', fc9_out_name)
-    add_loss_acc_layers(n, ['pred_', 'label_'])
-
-    return n.to_proto()
-
-def create_model_q(lmdb_paths, batch_size):
-    fc7_lmdb_path = lmdb_paths[0]
-    pool5_cols_lmdb_path = lmdb_paths[1]
-    label_lmdb_path = lmdb_paths[2]
-
-    n = caffe.NetSpec()
-    # Data layers
-    n['fc7'] = L.Data(name='fc7', batch_size=batch_size, backend=P.Data.LMDB, source=fc7_lmdb_path)
-    n['fc7_flatten'] = L.Flatten(name='fc7_flatten', bottom='fc7')
-    n['pool5_cols'] = L.Data(name='pool5_cols', batch_size=batch_size, backend=P.Data.LMDB, source=pool5_cols_lmdb_path)
-    n['label'] = L.Data(name='label', batch_size=batch_size, backend=P.Data.LMDB, source=label_lmdb_path)
-    n['label_class'], n['label_azimuth'], n['label_elevation'], n['label_tilt'] = L.Slice(name='labe-slice', bottom='label', ntop=4, slice_param=dict(
-        slice_dim=1, slice_point=[1,2,3]
-    ))
-    n['silence-label_class'] = L.Silence(name='silence-label_class', bottom='label_class', ntop=0)
-
-    # pool5 features
-    fc1_out_name = add_wrapped_fc_layer(n, 'fc1', 'pool5_cols', 384, dropout_ratio=DEFAULT_DROPOUT_RATIO)
-    fc2_out_name = add_wrapped_fc_layer(n, 'fc2', fc1_out_name, 384, dropout_ratio=DEFAULT_DROPOUT_RATIO)
-
-    # Fusion
-    n['concat'] = L.Concat(name='concat', bottom=['fc7_flatten', fc2_out_name])
-    fc8_out_name = add_wrapped_fc_layer(n, 'fc8', 'concat', 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
-    fc9_out_name = add_wrapped_fc_layer(n, 'fc9', fc8_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
-
-    # Prediction and loss layers
-    add_prediction_layers(n, 'pred_', fc9_out_name)
-    add_loss_acc_layers(n, ['pred_', 'label_'])
-
-    return n.to_proto()
-
-def create_model_r(lmdb_paths, batch_size):
-    pool5_weighted_lmdb_path = lmdb_paths[0]
-    label_lmdb_path = lmdb_paths[1]
-
-    n = caffe.NetSpec()
-    # Data layers
-    n['pool5_weighted'] = L.Data(name='pool5_weighted', batch_size=batch_size, backend=P.Data.LMDB, source=pool5_weighted_lmdb_path)
-    n['label'] = L.Data(name='label', batch_size=batch_size, backend=P.Data.LMDB, source=label_lmdb_path)
-    n['label_class'], n['label_azimuth'], n['label_elevation'], n['label_tilt'] = L.Slice(name='labe-slice', bottom='label', ntop=4, slice_param=dict(
-        slice_dim=1, slice_point=[1,2,3]
-    ))
-    n['silence-label_class'] = L.Silence(name='silence-label_class', bottom='label_class', ntop=0)
-
-    # FC layers
-    fc6_out_name = add_wrapped_fc_layer(n, 'fc6', 'pool5_weighted', 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
-    fc7_out_name = add_wrapped_fc_layer(n, 'fc7', fc6_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
-
-    # Prediction and loss layers
-    add_prediction_layers(n, 'pred_', fc7_out_name)
-    add_loss_acc_layers(n, ['pred_', 'label_'])
-
-    return n.to_proto()
-
-def create_model_r2(lmdb_paths, batch_size, crop_size=gv.g_images_resize_dim, imagenet_mean_file=gv.g_image_mean_binaryproto_file):
+def create_model_r(lmdb_paths, batch_size, crop_size=gv.g_images_resize_dim, imagenet_mean_file=gv.g_image_mean_binaryproto_file):
     train_data_lmdb_path = lmdb_paths[0]
     pool5_weight_maps_lmdb_path = lmdb_paths[1]
     train_label_lmdb_path = lmdb_paths[2]
@@ -711,34 +538,9 @@ def main():
     # create_model_fn = create_model_r4cnn
     # input_data_shapes = dict(data=(1, 3, 227, 227))
 
-    # sub_lmdb_names = ['image_lmdb', 'viewpoint_label_lmdb']
-    # model_id = 'r4cnnpp_new_blah'
-    # create_model_fn = create_model_r4cnnpp
-
-    # sub_lmdb_names = ['image_lmdb', 'gaussian_keypoint_map_lmdb', 'keypoint_class_lmdb', 'viewpoint_label_lmdb']
-    # model_id = 'j_new'
-    # create_model_fn = create_model_j
-
-    # sub_lmdb_names = ['fc7_lmdb', 'conv3_cols_lmdb', 'viewpoint_label_lmdb']
-    # model_id = 'o'
-    # create_model_fn = create_model_o
-
-    # sub_lmdb_names = ['fc7_lmdb', 'conv4_cols_lmdb', 'viewpoint_label_lmdb']
-    # model_id = 'p'
-    # create_model_fn = create_model_p
-
-    # sub_lmdb_names = ['fc7_lmdb', 'pool5_cols_lmdb', 'viewpoint_label_lmdb']
-    # model_id = 'q'
-    # create_model_fn = create_model_q
-
-    # sub_lmdb_names = ['pool5_weighted_lmdb', 'viewpoint_label_lmdb']
-    # model_id = 'r'
-    # create_model_fn = create_model_r
-    # input_data_shapes = dict(pool5_weighted=(1, 6, 6, 256))
-
     sub_lmdb_names = ['image_lmdb', 'pool5_weight_maps_lmdb', 'viewpoint_label_lmdb']
-    model_id = 'r2'
-    create_model_fn = create_model_r2
+    model_id = 'r'
+    create_model_fn = create_model_r
     input_data_shapes = dict(data=(1, 3, 227, 227), pool5_weight_map=(1, 1, 6, 6))
 
     # sub_lmdb_names = ['image_lmdb', 'pool5_weight_maps_lmdb', 'viewpoint_label_lmdb']
@@ -746,22 +548,25 @@ def main():
     # create_model_fn = create_model_s
     # input_data_shapes = dict(data=(1, 3, 227, 227), pool5_weight_map=(1, 1, 6, 6))
 
-
-    train_batch_size = 192
-    test_batch_size = 192
-    # input_data_shapes = dict(data=(1, 3, 227, 227), data_keypoint_image=(1, 1, 227, 227), data_keypoint_class=(1, 34), data_pool5=(1, 256))
-    # input_data_shapes = dict(fc7=(1, 4096), conv3_cols=(1, 384), conv4_cols=(1, 384), pool5_cols=(1, 256))
-    syn_stepsize = 100000
-    syn_max_iter = 100000
-    real_stepsize = 2000
+    batch_size = 192
+    syn_stepsize = 200000
+    syn_max_iter = 200000
+    syn_base_lr = 0.00001
+    real_stepsize = 10000
     real_max_iter = 10000
     real_test_interval = 1000
+
+    # Add learning rate to model ID
+    model_id = model_id + '_base_lr-' + str(syn_base_lr)
+
     verify_net = False
 
     # Set LMDB paths
     syn_lmdb_paths = [os.path.join(gv.g_corresp_syn_lmdb_folder, lmdb_name) for lmdb_name in sub_lmdb_names]
-    real_train_lmdb_paths = [os.path.join(gv.g_corresp_real_train_lmdb_folder, lmdb_name) for lmdb_name in sub_lmdb_names]
-    real_test_lmdb_paths = [os.path.join(gv.g_corresp_real_test_lmdb_folder, lmdb_name) for lmdb_name in sub_lmdb_names]
+    real_train_train_lmdb_paths = [os.path.join(gv.g_corresp_real_train_train_lmdb_folder, lmdb_name) for lmdb_name in sub_lmdb_names]
+    real_train_valid_lmdb_paths = [os.path.join(gv.g_corresp_real_train_val_lmdb_folder, lmdb_name) for lmdb_name in sub_lmdb_names]
+    # real_train_lmdb_paths = [os.path.join(gv.g_corresp_real_train_lmdb_folder, lmdb_name) for lmdb_name in sub_lmdb_names]
+    # real_test_lmdb_paths = [os.path.join(gv.g_corresp_real_test_lmdb_folder, lmdb_name) for lmdb_name in sub_lmdb_names]
 
     # Define paths for solver and models for training on synthetic data
     model_root = os.path.join(gv.g_corresp_model_root_folder, model_id)
@@ -781,15 +586,15 @@ def main():
         os.makedirs(model_root)
 
     # Save synthetic training model prototxt
-    model_syn_train = create_model_fn(syn_lmdb_paths, train_batch_size)
+    model_syn_train = create_model_fn(syn_lmdb_paths, batch_size)
     with open(model_syn_train_path, 'w') as f:
         f.write(str(model_syn_train))
     # Save real training model prototxt
-    model_real_train = create_model_fn(real_train_lmdb_paths, train_batch_size)
+    model_real_train = create_model_fn(real_train_train_lmdb_paths, batch_size)
     with open(model_real_train_path, 'w') as f:
         f.write(str(model_real_train))
     # Save real test model prototxt
-    model_real_test = create_model_fn(real_test_lmdb_paths, test_batch_size)
+    model_real_test = create_model_fn(real_train_valid_lmdb_paths, batch_size)
     with open(model_real_test_path, 'w') as f:
         f.write(str(model_real_test))
     # Save deploy model prototxt
@@ -807,7 +612,8 @@ def main():
         test_net=model_real_test_path,
         snapshot_prefix='syn',
         stepsize=syn_stepsize,
-        max_iter=syn_max_iter
+        max_iter=syn_max_iter,
+        base_lr=syn_base_lr
     )
     syn_solver_params = merge_dicts(DEFAULT_SOLVER_DICT, syn_override_params)
     syn_solver_str = dict_to_solver_text(syn_solver_params)

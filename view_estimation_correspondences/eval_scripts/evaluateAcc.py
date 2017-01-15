@@ -27,7 +27,7 @@ from google.protobuf import text_format
 
 # MAX_NUM_EXAMPLES = 500
 MAX_NUM_EXAMPLES = 1e6
-BATCH_SIZE = 192
+BATCH_SIZE = 384
 
 ### END IMPORTS ###
 
@@ -152,92 +152,7 @@ Arguments:
 - imagenet_mean_file: The path to the ImageNet mean .npy file
 - output_file: Where to store the accuracy results. By default, it will not save
 '''
-def get_model_acc(model_proto, model_weights, test_root, imagenet_mean_file=gv.g_image_mean_file, prediction_cache_file=None, eval_from_cache=False, blank_keypoint_img=False, blank_keypoint_class=False, use_keypoint_data=True, use_sparse_keypoint_map=True):
-    ## Get data from test LMDBs
-    # Images
-    image_lmdb = lmdb.open(os.path.join(test_root, 'image_lmdb'), readonly=True)
-    data_image = utils.getFirstNLmdbImgs(image_lmdb, MAX_NUM_EXAMPLES)
-    # Viewpoint labels
-    viewpoint_label_lmdb = lmdb.open(os.path.join(test_root, 'viewpoint_label_lmdb'))
-    viewpoint_labels = utils.getFirstNLmdbVecs(viewpoint_label_lmdb, MAX_NUM_EXAMPLES)
-    # Keypoint image
-    keypoint_loc_lmdb_name = 'keypoint_loc_lmdb' if use_sparse_keypoint_map else 'gaussian_keypoint_map_lmdb_23'
-    keypoint_loc_lmdb = lmdb.open(os.path.join(test_root, keypoint_loc_lmdb_name), readonly=True)
-    data_keypoint_image = utils.getFirstNLmdbImgs(keypoint_loc_lmdb, MAX_NUM_EXAMPLES)
-    # Keypoint class
-    keypoint_class_lmdb = lmdb.open(os.path.join(test_root, 'keypoint_class_lmdb'))
-    data_keypoint_class = utils.getFirstNLmdbVecs(keypoint_class_lmdb, MAX_NUM_EXAMPLES)
-
-    ## Get keys and make sure they match across all LMDBs
-    lmdb_keys = data_image.keys()
-    assert(lmdb_keys == viewpoint_labels.keys())
-    assert(lmdb_keys == data_keypoint_image.keys())
-    assert(lmdb_keys == data_keypoint_class.keys())
-
-    ## Process data for batch prediction
-    # Convert heatmaps from 227x227 to 1x227x227
-    for key in data_keypoint_image.keys():
-        data_keypoint_image[key] = data_keypoint_image[key].reshape((1, 227, 227))
-    # Blank out keypoint image if needed
-    if blank_keypoint_img:
-        for key in data_keypoint_image.keys():
-            data_keypoint_image[key][...] = 0
-    # Blank out keypoint class if needed
-    if blank_keypoint_class:
-        for key in data_keypoint_class.keys():
-            data_keypoint_class[key][...] = 0
-
-    angle_names = ['azimuth', 'elevation', 'tilt']
-    # output_keys = ['pred_azimuth', 'pred_elevation', 'pred_tilt']
-    output_keys = ['fc-azimuth', 'fc-elevation', 'fc-tilt']
-    if not eval_from_cache:
-        ## Configure data for batch_predict
-        input_data = {'data': data_image}
-        if use_keypoint_data:
-            input_data['data_keypoint_image'] = data_keypoint_image
-            input_data['data_keypoint_class'] = data_keypoint_class
-
-        # Do forward pass to extract predictions for all classes
-        full_predictions = batch_predict(model_proto, model_weights, min(MAX_NUM_EXAMPLES, BATCH_SIZE), input_data, output_keys, imagenet_mean_file, resize_dim=227)
-        # Cache predictions to file
-        if prediction_cache_file:
-            prediction_dict = {}
-            for i, angle_name in enumerate(angle_names):
-                prediction_dict[angle_name] = {}
-                for j, key in enumerate(lmdb_keys):
-                    prediction_dict[angle_name][key] = full_predictions[i][j]
-            pickle.dump(prediction_dict, open(prediction_cache_file, 'wb'))
-    else:
-        # Get predictions from cache file
-        print('Importing predictions from cache file')
-        prediction_dict = pickle.load(open(prediction_cache_file, 'rb'))
-        full_predictions = []
-        for angle_name in angle_names:
-            arr = []
-            for key in lmdb_keys:
-                arr.append(prediction_dict[angle_name][key])
-            full_predictions.append(arr)
-
-    # Convert labels to numpy array for comparing against predictions (which are returned as a matrix)
-    viewpoint_labels_as_mat = np.zeros((len(lmdb_keys), 4))
-    for i, key in enumerate(lmdb_keys):
-        viewpoint_labels_as_mat[i, :] = viewpoint_labels[key]
-    # Convert keypoint class vectors to indexes for stratified evaluation
-    keypoint_classes = [np.where(data_keypoint_class[lmdb_keys[k]])[0] for k in range(len(lmdb_keys))]
-
-    # Extract the angle predictions for the correct object class
-    obj_classes = viewpoint_labels_as_mat[:, 0]
-    preds = activations_to_preds(full_predictions, obj_classes)
-    # Compare predictions to ground truth labels
-    angle_dists = compute_angle_dists(preds, viewpoint_labels_as_mat)
-    # Compute accuracy and median error per object class
-    class_accs, class_med_errs = compute_metrics_by_obj_class(angle_dists, obj_classes)
-    # Compute accuracy and median error per keypoint class
-    keypoint_class_accs, keypoint_class_mederrs = compute_metrics_by_keypt_class(angle_dists, keypoint_classes)
-
-    return class_accs, class_med_errs, keypoint_class_accs, keypoint_class_mederrs
-
-def get_model_acc2(lmdb_tuples, model_proto, model_weights, test_root, output_keys, imagenet_mean_file=gv.g_image_mean_file, prediction_cache_file=None, eval_from_cache=False):
+def get_model_acc(lmdb_tuples, model_proto, model_weights, test_root, output_keys, imagenet_mean_file=gv.g_image_mean_file, activation_cache_file=None, eval_from_cache=False):
     '''
     lmdb_tuples (arr): Array where each entry is a triple (input_name, lmdb_name, is_image_data), where
         - input_name is the input blob name
@@ -281,36 +196,36 @@ def get_model_acc2(lmdb_tuples, model_proto, model_weights, test_root, output_ke
     # output_keys = ['pred_azimuth', 'pred_elevation', 'pred_tilt']
     if not eval_from_cache:
         # Do forward pass to extract predictions for all classes
-        full_predictions = batch_predict(model_proto, model_weights, min(MAX_NUM_EXAMPLES, BATCH_SIZE), input_data, output_keys, imagenet_mean_file, resize_dim=227)
+        full_activations = batch_predict(model_proto, model_weights, min(MAX_NUM_EXAMPLES, BATCH_SIZE), input_data, output_keys, imagenet_mean_file, resize_dim=227)
         # Cache predictions to file
-        if prediction_cache_file:
-            prediction_dict = {}
+        if activation_cache_file:
+            activation_dict = {}
             for i, angle_name in enumerate(angle_names):
-                prediction_dict[angle_name] = {}
+                activation_dict[angle_name] = {}
                 for j, key in enumerate(lmdb_keys):
-                    prediction_dict[angle_name][key] = full_predictions[i][j]
-            pickle.dump(prediction_dict, open(prediction_cache_file, 'wb'))
+                    activation_dict[angle_name][key] = full_activations[i][j]
+            pickle.dump(activation_dict, open(activation_cache_file, 'wb'))
     else:
-        # Get predictions from cache file
-        print('Importing predictions from cache file')
-        prediction_dict = pickle.load(open(prediction_cache_file, 'rb'))
-        full_predictions = []
+        # Get activations from cache file
+        print('Importing activations from cache file')
+        activation_dict = pickle.load(open(activation_cache_file, 'rb'))
+        full_activations = []
         for angle_name in angle_names:
             arr = []
             for key in lmdb_keys:
-                arr.append(prediction_dict[angle_name][key])
-            full_predictions.append(arr)
+                arr.append(activation_dict[angle_name][key])
+            full_activations.append(arr)
 
-    # Convert labels to numpy array for comparing against predictions (which are returned as a matrix)
+    # Convert labels to numpy array for comparing against activations (which are returned as a matrix)
     viewpoint_labels_as_mat = np.zeros((len(lmdb_keys), 4))
     for i, key in enumerate(lmdb_keys):
         viewpoint_labels_as_mat[i, :] = label_data[key]
     # Convert keypoint class vectors to indexes for stratified evaluation
     # keypoint_classes = [np.where(data_keypoint_class[lmdb_keys[k]])[0] for k in range(len(lmdb_keys))]
 
-    # Extract the angle predictions for the correct object class
+    # Extract the angle activations for the correct object class
     obj_classes = viewpoint_labels_as_mat[:, 0]
-    preds = activations_to_preds(full_predictions, obj_classes)
+    preds = activations_to_preds(full_activations, obj_classes)
     # Compare predictions to ground truth labels
     angle_dists = compute_angle_dists(preds, viewpoint_labels_as_mat)
     # Compute accuracy and median error per object class
@@ -399,11 +314,9 @@ if __name__ == '__main__':
     parser.set_defaults(eval_from_cache=False)
     args = parser.parse_args()
 
-    # class_accs, class_med_errs, keypoint_class_accs, keypoint_class_mederrs = get_model_acc(args.model_proto, args.model_weights, args.test_root, prediction_cache_file=args.prediction_cache_file, eval_from_cache=args.eval_from_cache, use_keypoint_data=False)
-
     assert(len(args.lmdb_info) % 3 == 0)
     lmdb_tuples = zip(args.lmdb_info[0::3], args.lmdb_info[1::3], [s == 'True' for s in args.lmdb_info[2::3]])
-    class_accs, class_med_errs, keypoint_class_accs, keypoint_class_mederrs = get_model_acc2(lmdb_tuples, args.model_proto, args.model_weights, args.test_root, args.output_keys, imagenet_mean_file=gv.g_image_mean_file, prediction_cache_file=args.prediction_cache_file, eval_from_cache=False)
+    class_accs, class_med_errs, keypoint_class_accs, keypoint_class_mederrs = get_model_acc(lmdb_tuples, args.model_proto, args.model_weights, args.test_root, args.output_keys, imagenet_mean_file=gv.g_image_mean_file, activation_cache_file=args.prediction_cache_file, eval_from_cache=False)
 
     # Write accuracy and median error results
     if args.output_file:
