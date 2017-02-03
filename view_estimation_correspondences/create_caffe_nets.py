@@ -4,6 +4,8 @@ from warnings import warn
 import tempfile
 import shutil
 from collections import OrderedDict
+import time
+import tempfile
 
 # Import global variables
 view_estimation_correspondences_path = os.path.dirname(os.path.abspath(__file__))
@@ -24,12 +26,14 @@ train_models_root_path = os.path.join(gv.g_render4cnn_root_folder, 'train')
 # Define common fillers and parameters
 DEFAULT_LRN_PARAM = dict(local_size=5, alpha=0.0001, beta=0.75)
 DEFAULT_DECAY_PARAM = [dict(decay_mult=1), dict(decay_mult=0)]
+NO_LEARN_PARAM = dict(lr_mult=0)
 HIGHER_LR_MULT_PARAM = [dict(lr_mult=10, decay_mult=1), dict(decay_mult=0)]
 DEFAULT_WEIGHT_FILLER = dict(type='gaussian', std=0.01)
 DEFAULT_BIAS_FILLER = dict(type='constant', value=0)
 DEFAULT_DROPOUT_RATIO = 0.5
 DEFAULT_ANGLE_NAMES = ['azimuth', 'elevation', 'tilt']
 DEFAULT_LOSS_WEIGHTS = [1, 1, 1]
+BATCH_SIZE = 192
 
 # Parameters for angle softmax+loss
 DEFAULT_SOFTMAX_VIEW_LOSS_PARAM_A = dict(bandwidth=15, sigma=5, pos_weight=1, neg_weight=0, period=360)
@@ -41,23 +45,65 @@ DEFAULT_ACCURACY_VIEW_PARAM_ET = dict(tol_angle=5, period=360)
 DEFAULT_ACCURACY_VIEW_PARAMS = [DEFAULT_ACCURACY_VIEW_PARAM_A, DEFAULT_ACCURACY_VIEW_PARAM_ET, DEFAULT_ACCURACY_VIEW_PARAM_ET]
 
 # Default solver
-DEFAULT_SOLVER_DICT = dict(
+SYN_SOLVER_DICT = dict(
     train_net=None,
     test_net=None,
     test_iter=15,
     test_interval=2000,
     base_lr=0.0001,
-    lr_policy='step',
-    gamma=0.1,
-    stepsize=100000,
-    max_iter=100000,
+    lr_policy='fixed',
+    max_iter=500000,
     display=20,
     momentum=0.9,
+    momentum2=0.999,
     weight_decay=0.0005,
-    snapshot=1000,
-    snapshot_prefix=None,
-    solver_mode='GPU'
+    snapshot=2000,
+    snapshot_prefix='syn',
+    solver_mode='GPU',
+    type='Adam'
 )
+
+REAL_VAL_SOLVER_DICT = dict(
+    train_net=None,
+    test_net=None,
+    test_iter=11,
+    test_interval=11,
+    base_lr=0.00001,
+    lr_policy='fixed',
+    max_iter=10000,
+    display=20,
+    momentum=0.9,
+    momentum2=0.999,
+    weight_decay=0.0005,
+    snapshot=11,
+    snapshot_prefix='real',
+    solver_mode='GPU',
+    type='Adam'
+)
+
+REAL_SOLVER_DICT = dict(
+    train_net=None,
+    test_net=None,
+    test_iter=36,
+    test_interval=36,
+    base_lr=0.00001,
+    lr_policy='fixed',
+    max_iter=10000,
+    display=20,
+    momentum=0.9,
+    momentum2=0.999,
+    weight_decay=0.0005,
+    snapshot=36,
+    snapshot_prefix='real',
+    solver_mode='GPU',
+    type='Adam'
+)
+
+fn_desc_map = {
+    'create_model_w': 'Downsample keypoint map (5x5) and pass through fc layer. Concat to R4CNN fc7, pass to 1 hidden layer and then prediction'
+}
+
+
 
 '''
 Merge the given dictionaries and return the result.
@@ -365,6 +411,134 @@ def create_model_r4cnn(lmdb_paths, batch_size, crop_size=gv.g_images_resize_dim,
 
     return n.to_proto()
 
+# Re-learn prediction layers, fixed conv
+def create_model_r4cnn_fc_from_scratch(lmdb_paths, batch_size, crop_size=gv.g_images_resize_dim, imagenet_mean_file=gv.g_image_mean_binaryproto_file):
+    train_data_lmdb_path = lmdb_paths[0]
+    train_label_lmdb_path = lmdb_paths[1]
+    data_transform_param = dict(
+        crop_size=crop_size,
+        mean_file=imagenet_mean_file,
+        mirror=False
+    )
+
+    n = caffe.NetSpec()
+    # Data layers
+    n['data'] = L.Data(name='data', batch_size=batch_size, backend=P.Data.LMDB, source=train_data_lmdb_path, transform_param=data_transform_param)
+    n['label'] = L.Data(name='label', batch_size=batch_size, backend=P.Data.LMDB, source=train_label_lmdb_path)
+    n['label_class'], n['label_azimuth'], n['label_elevation'], n['label_tilt'] = L.Slice(name='labe-slice', bottom='label', ntop=4, slice_param=dict(
+        slice_dim=1, slice_point=[1,2,3]
+    ))
+    n['silence-label_class'] = L.Silence(name='silence-label_class', bottom='label_class', ntop=0)
+
+    # Image (Render for CNN) features
+    conv1_param = dict(num_output=96, kernel_size=11, stride=4)
+    pool1_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    conv2_param = dict(num_output=256, pad=2, kernel_size=5, group=2)
+    pool2_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    conv3_param = dict(num_output=384, pad=1, kernel_size=3)
+    conv4_param = dict(num_output=384, pad=1, kernel_size=3, group=2)
+    conv5_param = dict(num_output=256, pad=1, kernel_size=3, group=2)
+    pool5_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    conv1_out_name = add_wrapped_conv_layer(n, 'conv1', 'data', conv1_param, param=NO_LEARN_PARAM, pooling_param=pool1_param, lrn_param=DEFAULT_LRN_PARAM)
+    conv2_out_name = add_wrapped_conv_layer(n, 'conv2', conv1_out_name, conv2_param, param=NO_LEARN_PARAM, pooling_param=pool2_param, lrn_param=DEFAULT_LRN_PARAM)
+    conv3_out_name = add_wrapped_conv_layer(n, 'conv3', conv2_out_name, conv3_param, param=NO_LEARN_PARAM)
+    conv4_out_name = add_wrapped_conv_layer(n, 'conv4', conv3_out_name, conv4_param, param=NO_LEARN_PARAM)
+    conv5_out_name = add_wrapped_conv_layer(n, 'conv5', conv4_out_name, conv5_param, param=NO_LEARN_PARAM, pooling_param=pool5_param)
+    fc6_out_name = add_wrapped_fc_layer(n, 'fc6-new', conv5_out_name, 4096, param=DEFAULT_DECAY_PARAM, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+    fc7_out_name = add_wrapped_fc_layer(n, 'fc7-new', fc6_out_name, 4096, param=DEFAULT_DECAY_PARAM, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+
+    # Prediction and loss layers
+    add_prediction_layers(n, 'pred_', fc7_out_name)
+    add_loss_acc_layers(n, ['pred_', 'label_'])
+
+    return n.to_proto()
+
+
+# Re-learn last two conv layers and FC layers, as per R4CNN paper
+def create_model_r4cnn_orig_train_proc(lmdb_paths, batch_size, crop_size=gv.g_images_resize_dim, imagenet_mean_file=gv.g_image_mean_binaryproto_file):
+    train_data_lmdb_path = lmdb_paths[0]
+    train_label_lmdb_path = lmdb_paths[1]
+    data_transform_param = dict(
+        crop_size=crop_size,
+        mean_file=imagenet_mean_file,
+        mirror=False
+    )
+
+    n = caffe.NetSpec()
+    # Data layers
+    n['data'] = L.Data(name='data', batch_size=batch_size, backend=P.Data.LMDB, source=train_data_lmdb_path, transform_param=data_transform_param)
+    n['label'] = L.Data(name='label', batch_size=batch_size, backend=P.Data.LMDB, source=train_label_lmdb_path)
+    n['label_class'], n['label_azimuth'], n['label_elevation'], n['label_tilt'] = L.Slice(name='labe-slice', bottom='label', ntop=4, slice_param=dict(
+        slice_dim=1, slice_point=[1,2,3]
+    ))
+    n['silence-label_class'] = L.Silence(name='silence-label_class', bottom='label_class', ntop=0)
+
+    # Image (Render for CNN) features
+    conv1_param = dict(num_output=96, kernel_size=11, stride=4)
+    pool1_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    conv2_param = dict(num_output=256, pad=2, kernel_size=5, group=2)
+    pool2_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    conv3_param = dict(num_output=384, pad=1, kernel_size=3)
+    conv4_param = dict(num_output=384, pad=1, kernel_size=3, group=2)
+    conv5_param = dict(num_output=256, pad=1, kernel_size=3, group=2)
+    pool5_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    conv1_out_name = add_wrapped_conv_layer(n, 'conv1', 'data', conv1_param, param=NO_LEARN_PARAM, pooling_param=pool1_param, lrn_param=DEFAULT_LRN_PARAM)
+    conv2_out_name = add_wrapped_conv_layer(n, 'conv2', conv1_out_name, conv2_param, param=NO_LEARN_PARAM, pooling_param=pool2_param, lrn_param=DEFAULT_LRN_PARAM)
+    conv3_out_name = add_wrapped_conv_layer(n, 'conv3', conv2_out_name, conv3_param, param=NO_LEARN_PARAM)
+    conv4_out_name = add_wrapped_conv_layer(n, 'conv4', conv3_out_name, conv4_param, param=NO_LEARN_PARAM)
+    conv5_out_name = add_wrapped_conv_layer(n, 'conv5', conv4_out_name, conv5_param, param=DEFAULT_DECAY_PARAM, pooling_param=pool5_param)
+    fc6_out_name = add_wrapped_fc_layer(n, 'fc6', conv5_out_name, 4096, param=DEFAULT_DECAY_PARAM, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+    fc7_out_name = add_wrapped_fc_layer(n, 'fc7', fc6_out_name, 4096, param=DEFAULT_DECAY_PARAM, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+
+    # Prediction and loss layers
+    add_prediction_layers(n, 'pred_', fc7_out_name)
+    add_loss_acc_layers(n, ['pred_', 'label_'])
+
+    return n.to_proto()
+
+
+def create_model_r4cnnp_fixed_conv(lmdb_paths, batch_size, crop_size=gv.g_images_resize_dim, imagenet_mean_file=gv.g_image_mean_binaryproto_file):
+    data_lmdb_path = lmdb_paths[0]
+    label_lmdb_path = lmdb_paths[1]
+    data_transform_param = dict(
+        crop_size=crop_size,
+        mean_file=imagenet_mean_file,
+        mirror=False
+    )
+
+    n = caffe.NetSpec()
+    # Data layers
+    n['data'] = L.Data(name='data', batch_size=batch_size, backend=P.Data.LMDB, source=data_lmdb_path, transform_param=data_transform_param)
+    n['label'] = L.Data(name='label', batch_size=batch_size, backend=P.Data.LMDB, source=label_lmdb_path)
+    n['label_class'], n['label_azimuth'], n['label_elevation'], n['label_tilt'] = L.Slice(name='labe-slice', bottom='label', ntop=4, slice_param=dict(
+        slice_dim=1, slice_point=[1,2,3]
+    ))
+    n['silence-label_class'] = L.Silence(name='silence-label_class', bottom='label_class', ntop=0)
+
+    # Image (Render for CNN) features
+    conv1_param = dict(num_output=96, kernel_size=11, stride=4)
+    pool1_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    conv2_param = dict(num_output=256, pad=2, kernel_size=5, group=2)
+    pool2_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    conv3_param = dict(num_output=384, pad=1, kernel_size=3)
+    conv4_param = dict(num_output=384, pad=1, kernel_size=3, group=2)
+    conv5_param = dict(num_output=256, pad=1, kernel_size=3, group=2)
+    pool5_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    conv1_out_name = add_wrapped_conv_layer(n, 'conv1', 'data', conv1_param, param=NO_LEARN_PARAM, pooling_param=pool1_param, lrn_param=DEFAULT_LRN_PARAM)
+    conv2_out_name = add_wrapped_conv_layer(n, 'conv2', conv1_out_name, conv2_param, param=NO_LEARN_PARAM, pooling_param=pool2_param, lrn_param=DEFAULT_LRN_PARAM)
+    conv3_out_name = add_wrapped_conv_layer(n, 'conv3', conv2_out_name, conv3_param, param=NO_LEARN_PARAM)
+    conv4_out_name = add_wrapped_conv_layer(n, 'conv4', conv3_out_name, conv4_param, param=NO_LEARN_PARAM)
+    conv5_out_name = add_wrapped_conv_layer(n, 'conv5', conv4_out_name, conv5_param, param=NO_LEARN_PARAM, pooling_param=pool5_param)
+    fc6_out_name = add_wrapped_fc_layer(n, 'fc6', conv5_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+    fc7_out_name = add_wrapped_fc_layer(n, 'fc7', fc6_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+    fc8_out_name = add_wrapped_fc_layer(n, 'fc8', fc7_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+
+    # Prediction and loss layers
+    add_prediction_layers(n, 'pred_', fc8_out_name)
+    add_loss_acc_layers(n, ['pred_', 'label_'])
+
+    return n.to_proto()
+
 def create_model_r4cnnpp(lmdb_paths, batch_size, crop_size=gv.g_images_resize_dim, imagenet_mean_file=gv.g_image_mean_binaryproto_file):
     data_lmdb_path = lmdb_paths[0]
     label_lmdb_path = lmdb_paths[1]
@@ -531,112 +705,650 @@ def create_model_s(lmdb_paths, batch_size, crop_size=gv.g_images_resize_dim, ima
     return n.to_proto()
 
 
+'''
+LRN after pool5_weighted. High learning rate for fc6/7-a and prediction layers. Fixed conv1-3 layers.
+'''
+def create_model_s2(lmdb_paths, batch_size, crop_size=gv.g_images_resize_dim, imagenet_mean_file=gv.g_image_mean_binaryproto_file):
+    train_data_lmdb_path = lmdb_paths[0]
+    pool5_weight_maps_lmdb_path = lmdb_paths[1]
+    train_label_lmdb_path = lmdb_paths[2]
+    data_transform_param = dict(
+        crop_size=crop_size,
+        mean_file=imagenet_mean_file,
+        mirror=False
+    )
+
+    n = caffe.NetSpec()
+    # Data layers
+    n['data'] = L.Data(name='data', batch_size=batch_size, backend=P.Data.LMDB, source=train_data_lmdb_path, transform_param=data_transform_param)
+    n['pool5_weight_map'] = L.Data(name='pool5_weight_map', batch_size=batch_size, backend=P.Data.LMDB, source=pool5_weight_maps_lmdb_path)
+    n['label'] = L.Data(name='label', batch_size=batch_size, backend=P.Data.LMDB, source=train_label_lmdb_path)
+    n['label_class'], n['label_azimuth'], n['label_elevation'], n['label_tilt'] = L.Slice(name='labe-slice', bottom='label', ntop=4, slice_param=dict(
+        slice_dim=1, slice_point=[1,2,3]
+    ))
+    n['silence-label_class'] = L.Silence(name='silence-label_class', bottom='label_class', ntop=0)
+
+    # Parameters
+    conv1_conv_param = dict(num_output=96, kernel_size=11, stride=4)
+    pool1_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    conv2_conv_param = dict(num_output=256, pad=2, kernel_size=5, group=2)
+    pool2_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    conv3_conv_param = dict(num_output=384, pad=1, kernel_size=3)
+    conv4_conv_param = dict(num_output=384, pad=1, kernel_size=3, group=2)
+    conv5_conv_param = dict(num_output=256, pad=1, kernel_size=3, group=2)
+    pool5_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    pool5_weighted_param = dict(operation=P.Eltwise.PROD)
+    fc7_sum_param = dict(operation=P.Eltwise.PROD)
+
+    # Image (Render for CNN) features
+    conv1_out_name = add_wrapped_conv_layer(n, 'conv1', 'data', conv1_conv_param, param=NO_LEARN_PARAM, pooling_param=pool1_param, lrn_param=DEFAULT_LRN_PARAM)
+    conv2_out_name = add_wrapped_conv_layer(n, 'conv2', conv1_out_name, conv2_conv_param, param=NO_LEARN_PARAM, pooling_param=pool2_param, lrn_param=DEFAULT_LRN_PARAM)
+    conv3_out_name = add_wrapped_conv_layer(n, 'conv3', conv2_out_name, conv3_conv_param, param=NO_LEARN_PARAM)
+    conv4_out_name = add_wrapped_conv_layer(n, 'conv4', conv3_out_name, conv4_conv_param, param=DEFAULT_DECAY_PARAM)
+    conv5_out_name = add_wrapped_conv_layer(n, 'conv5', conv4_out_name, conv5_conv_param, param=DEFAULT_DECAY_PARAM, pooling_param=pool5_param)
+    fc6_out_name = add_wrapped_fc_layer(n, 'fc6', conv5_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+    fc7_out_name = add_wrapped_fc_layer(n, 'fc7', fc6_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+
+    # Get pool5 weighted features. First, slice channels
+    add_slice_layer(n, 'pool5', ['pool5_slice_' + str(i) for i in range(256)], dict(
+        axis=1, slice_point=range(1, 256)
+    ))
+    # Then weigh each channel by the map
+    for i in range(256):
+        slice_bottom_name = 'pool5_slice_' + str(i)
+        top_name = 'pool5_weighted_' + str(i)
+        n[top_name] = L.Eltwise(name=top_name, bottom=[slice_bottom_name, 'pool5_weight_map'], eltwise_param=pool5_weighted_param)
+    # Finally, combine weighted maps
+    n['pool5_weighted'] = L.Concat(name='pool5_weighted', bottom=['pool5_weighted_' + str(i) for i in range(256)])
+    # Add LRN and FC features from weighted features
+    n['pool5_weighted_lrn'] = lrn('pool5_weighted_lrn', 'pool5_weighted', DEFAULT_LRN_PARAM)
+    fc6_a_out_name = add_wrapped_fc_layer(n, 'fc6-a', 'pool5_weighted_lrn', 4096, param=HIGHER_LR_MULT_PARAM, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+    fc7_a_out_name = add_wrapped_fc_layer(n, 'fc7-a', fc6_a_out_name, 4096, param=HIGHER_LR_MULT_PARAM, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+
+    # Combined FC7 features
+    n['fc7-sum'] = L.Eltwise(name='fc7-sum', bottom=[fc7_out_name, fc7_a_out_name], eltwise_param=fc7_sum_param)
+    # Prediction and loss layers
+    add_prediction_layers(n, 'pred_', 'fc7-sum', param=HIGHER_LR_MULT_PARAM)
+    add_loss_acc_layers(n, ['pred_', 'label_'])
+
+    return n.to_proto()
+
+
+def create_model_s_fixed_conv_lrn(lmdb_paths, batch_size, crop_size=gv.g_images_resize_dim, imagenet_mean_file=gv.g_image_mean_binaryproto_file):
+    train_data_lmdb_path = lmdb_paths[0]
+    pool5_weight_maps_lmdb_path = lmdb_paths[1]
+    train_label_lmdb_path = lmdb_paths[2]
+    data_transform_param = dict(
+        crop_size=crop_size,
+        mean_file=imagenet_mean_file,
+        mirror=False
+    )
+
+    n = caffe.NetSpec()
+    # Data layers
+    n['data'] = L.Data(name='data', batch_size=batch_size, backend=P.Data.LMDB, source=train_data_lmdb_path, transform_param=data_transform_param)
+    n['pool5_weight_map'] = L.Data(name='pool5_weight_map', batch_size=batch_size, backend=P.Data.LMDB, source=pool5_weight_maps_lmdb_path)
+    n['label'] = L.Data(name='label', batch_size=batch_size, backend=P.Data.LMDB, source=train_label_lmdb_path)
+    n['label_class'], n['label_azimuth'], n['label_elevation'], n['label_tilt'] = L.Slice(name='labe-slice', bottom='label', ntop=4, slice_param=dict(
+        slice_dim=1, slice_point=[1,2,3]
+    ))
+    n['silence-label_class'] = L.Silence(name='silence-label_class', bottom='label_class', ntop=0)
+
+    # Parameters
+    conv1_conv_param = dict(num_output=96, kernel_size=11, stride=4)
+    pool1_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    conv2_conv_param = dict(num_output=256, pad=2, kernel_size=5, group=2)
+    pool2_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    conv3_conv_param = dict(num_output=384, pad=1, kernel_size=3)
+    conv4_conv_param = dict(num_output=384, pad=1, kernel_size=3, group=2)
+    conv5_conv_param = dict(num_output=256, pad=1, kernel_size=3, group=2)
+    pool5_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    pool5_weighted_param = dict(operation=P.Eltwise.PROD)
+    fc7_sum_param = dict(operation=P.Eltwise.SUM)
+
+    # Image (Render for CNN) features
+    conv1_out_name = add_wrapped_conv_layer(n, 'conv1', 'data', conv1_conv_param, param=NO_LEARN_PARAM, pooling_param=pool1_param, lrn_param=DEFAULT_LRN_PARAM)
+    conv2_out_name = add_wrapped_conv_layer(n, 'conv2', conv1_out_name, conv2_conv_param, param=NO_LEARN_PARAM, pooling_param=pool2_param, lrn_param=DEFAULT_LRN_PARAM)
+    conv3_out_name = add_wrapped_conv_layer(n, 'conv3', conv2_out_name, conv3_conv_param, param=NO_LEARN_PARAM)
+    conv4_out_name = add_wrapped_conv_layer(n, 'conv4', conv3_out_name, conv4_conv_param, param=NO_LEARN_PARAM)
+    conv5_out_name = add_wrapped_conv_layer(n, 'conv5', conv4_out_name, conv5_conv_param, param=NO_LEARN_PARAM, pooling_param=pool5_param)
+    fc6_out_name = add_wrapped_fc_layer(n, 'fc6', conv5_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+    fc7_out_name = add_wrapped_fc_layer(n, 'fc7', fc6_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+
+    # Get pool5 weighted features. First, slice channels
+    add_slice_layer(n, 'pool5', ['pool5_slice_' + str(i) for i in range(256)], dict(
+        axis=1, slice_point=range(1, 256)
+    ))
+    # Then weigh each channel by the map
+    for i in range(256):
+        slice_bottom_name = 'pool5_slice_' + str(i)
+        top_name = 'pool5_weighted_' + str(i)
+        n[top_name] = L.Eltwise(name=top_name, bottom=[slice_bottom_name, 'pool5_weight_map'], eltwise_param=pool5_weighted_param)
+    # Finally, combine weighted maps
+    n['pool5_weighted'] = L.Concat(name='pool5_weighted', bottom=['pool5_weighted_' + str(i) for i in range(256)])
+    n['pool5_weighted_lrn'] = lrn('pool5_weighted_lrn', 'pool5_weighted', DEFAULT_LRN_PARAM)
+    # Add FC features from weighted features
+    fc6_a_out_name = add_wrapped_fc_layer(n, 'fc6-a', 'pool5_weighted_lrn', 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+    fc7_a_out_name = add_wrapped_fc_layer(n, 'fc7-a', fc6_a_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+
+    # Combined FC7 features
+    n['fc7-sum'] = L.Eltwise(name='fc7-sum', bottom=[fc7_out_name, fc7_a_out_name], eltwise_param=fc7_sum_param)
+    # Prediction and loss layers
+    add_prediction_layers(n, 'pred_', 'fc7-sum')
+    add_loss_acc_layers(n, ['pred_', 'label_'])
+
+    return n.to_proto()
+
+
+# Model s with all FC layers trained from scratch
+def create_model_s_fixed_conv_scratch_fc(lmdb_paths, batch_size, crop_size=gv.g_images_resize_dim, imagenet_mean_file=gv.g_image_mean_binaryproto_file):
+    train_data_lmdb_path = lmdb_paths[0]
+    pool5_weight_maps_lmdb_path = lmdb_paths[1]
+    train_label_lmdb_path = lmdb_paths[2]
+    data_transform_param = dict(
+        crop_size=crop_size,
+        mean_file=imagenet_mean_file,
+        mirror=False
+    )
+
+    n = caffe.NetSpec()
+    # Data layers
+    n['data'] = L.Data(name='data', batch_size=batch_size, backend=P.Data.LMDB, source=train_data_lmdb_path, transform_param=data_transform_param)
+    n['pool5_weight_map'] = L.Data(name='pool5_weight_map', batch_size=batch_size, backend=P.Data.LMDB, source=pool5_weight_maps_lmdb_path)
+    n['label'] = L.Data(name='label', batch_size=batch_size, backend=P.Data.LMDB, source=train_label_lmdb_path)
+    n['label_class'], n['label_azimuth'], n['label_elevation'], n['label_tilt'] = L.Slice(name='labe-slice', bottom='label', ntop=4, slice_param=dict(
+        slice_dim=1, slice_point=[1,2,3]
+    ))
+    n['silence-label_class'] = L.Silence(name='silence-label_class', bottom='label_class', ntop=0)
+
+    # Parameters
+    conv1_conv_param = dict(num_output=96, kernel_size=11, stride=4)
+    pool1_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    conv2_conv_param = dict(num_output=256, pad=2, kernel_size=5, group=2)
+    pool2_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    conv3_conv_param = dict(num_output=384, pad=1, kernel_size=3)
+    conv4_conv_param = dict(num_output=384, pad=1, kernel_size=3, group=2)
+    conv5_conv_param = dict(num_output=256, pad=1, kernel_size=3, group=2)
+    pool5_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    pool5_weighted_param = dict(operation=P.Eltwise.PROD)
+    fc7_sum_param = dict(operation=P.Eltwise.SUM)
+
+    # Image (Render for CNN) features
+    conv1_out_name = add_wrapped_conv_layer(n, 'conv1', 'data', conv1_conv_param, param=NO_LEARN_PARAM, pooling_param=pool1_param, lrn_param=DEFAULT_LRN_PARAM)
+    conv2_out_name = add_wrapped_conv_layer(n, 'conv2', conv1_out_name, conv2_conv_param, param=NO_LEARN_PARAM, pooling_param=pool2_param, lrn_param=DEFAULT_LRN_PARAM)
+    conv3_out_name = add_wrapped_conv_layer(n, 'conv3', conv2_out_name, conv3_conv_param, param=NO_LEARN_PARAM)
+    conv4_out_name = add_wrapped_conv_layer(n, 'conv4', conv3_out_name, conv4_conv_param, param=NO_LEARN_PARAM)
+    conv5_out_name = add_wrapped_conv_layer(n, 'conv5', conv4_out_name, conv5_conv_param, param=NO_LEARN_PARAM, pooling_param=pool5_param)
+    fc6_out_name = add_wrapped_fc_layer(n, 'fc6-new', conv5_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+    fc7_out_name = add_wrapped_fc_layer(n, 'fc7-new', fc6_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+
+    # Get pool5 weighted features. First, slice channels
+    add_slice_layer(n, 'pool5', ['pool5_slice_' + str(i) for i in range(256)], dict(
+        axis=1, slice_point=range(1, 256)
+    ))
+    # Then weigh each channel by the map
+    for i in range(256):
+        slice_bottom_name = 'pool5_slice_' + str(i)
+        top_name = 'pool5_weighted_' + str(i)
+        n[top_name] = L.Eltwise(name=top_name, bottom=[slice_bottom_name, 'pool5_weight_map'], eltwise_param=pool5_weighted_param)
+    # Finally, combine weighted maps
+    n['pool5_weighted'] = L.Concat(name='pool5_weighted', bottom=['pool5_weighted_' + str(i) for i in range(256)])
+    # Add FC features from weighted features
+    fc6_a_out_name = add_wrapped_fc_layer(n, 'fc6-a', 'pool5_weighted', 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+    fc7_a_out_name = add_wrapped_fc_layer(n, 'fc7-a', fc6_a_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+
+    # Combined FC7 features
+    n['fc7-sum'] = L.Eltwise(name='fc7-sum', bottom=[fc7_out_name, fc7_a_out_name], eltwise_param=fc7_sum_param)
+    # Prediction and loss layers
+    add_prediction_layers(n, 'pred_', 'fc7-sum')
+    add_loss_acc_layers(n, ['pred_', 'label_'])
+
+    return n.to_proto()
+
+
+def create_model_t_fixed_conv(lmdb_paths, batch_size, crop_size=gv.g_images_resize_dim, imagenet_mean_file=gv.g_image_mean_binaryproto_file):
+    train_data_lmdb_path = lmdb_paths[0]
+    pool5_weight_maps_lmdb_path = lmdb_paths[1]
+    train_label_lmdb_path = lmdb_paths[2]
+    data_transform_param = dict(
+        crop_size=crop_size,
+        mean_file=imagenet_mean_file,
+        mirror=False
+    )
+
+    n = caffe.NetSpec()
+    # Data layers
+    n['data'] = L.Data(name='data', batch_size=batch_size, backend=P.Data.LMDB, source=train_data_lmdb_path, transform_param=data_transform_param)
+    n['pool5_weight_map'] = L.Data(name='pool5_weight_map', batch_size=batch_size, backend=P.Data.LMDB, source=pool5_weight_maps_lmdb_path)
+    n['label'] = L.Data(name='label', batch_size=batch_size, backend=P.Data.LMDB, source=train_label_lmdb_path)
+    n['label_class'], n['label_azimuth'], n['label_elevation'], n['label_tilt'] = L.Slice(name='labe-slice', bottom='label', ntop=4, slice_param=dict(
+        slice_dim=1, slice_point=[1,2,3]
+    ))
+    n['silence-label_class'] = L.Silence(name='silence-label_class', bottom='label_class', ntop=0)
+
+    # Parameters
+    conv1_conv_param = dict(num_output=96, kernel_size=11, stride=4)
+    pool1_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    conv2_conv_param = dict(num_output=256, pad=2, kernel_size=5, group=2)
+    pool2_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    conv3_conv_param = dict(num_output=384, pad=1, kernel_size=3)
+    conv4_conv_param = dict(num_output=384, pad=1, kernel_size=3, group=2)
+    conv5_conv_param = dict(num_output=256, pad=1, kernel_size=3, group=2)
+    pool5_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    pool5_weighted_param = dict(operation=P.Eltwise.PROD)
+    fc6_sum_param = dict(operation=P.Eltwise.MAX)
+
+    # Image (Render for CNN) features
+    conv1_out_name = add_wrapped_conv_layer(n, 'conv1', 'data', conv1_conv_param, param=NO_LEARN_PARAM, pooling_param=pool1_param, lrn_param=DEFAULT_LRN_PARAM)
+    conv2_out_name = add_wrapped_conv_layer(n, 'conv2', conv1_out_name, conv2_conv_param, param=NO_LEARN_PARAM, pooling_param=pool2_param, lrn_param=DEFAULT_LRN_PARAM)
+    conv3_out_name = add_wrapped_conv_layer(n, 'conv3', conv2_out_name, conv3_conv_param, param=NO_LEARN_PARAM)
+    conv4_out_name = add_wrapped_conv_layer(n, 'conv4', conv3_out_name, conv4_conv_param, param=NO_LEARN_PARAM)
+    conv5_out_name = add_wrapped_conv_layer(n, 'conv5', conv4_out_name, conv5_conv_param, param=NO_LEARN_PARAM, pooling_param=pool5_param)
+    fc6_out_name = add_wrapped_fc_layer(n, 'fc6', conv5_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+
+    # Get pool5 weighted features. First, slice channels
+    add_slice_layer(n, 'pool5', ['pool5_slice_' + str(i) for i in range(256)], dict(
+        axis=1, slice_point=range(1, 256)
+    ))
+    # Then weigh each channel by the map
+    for i in range(256):
+        slice_bottom_name = 'pool5_slice_' + str(i)
+        top_name = 'pool5_weighted_' + str(i)
+        n[top_name] = L.Eltwise(name=top_name, bottom=[slice_bottom_name, 'pool5_weight_map'], eltwise_param=pool5_weighted_param)
+    # Finally, combine weighted maps
+    n['pool5_weighted'] = L.Concat(name='pool5_weighted', bottom=['pool5_weighted_' + str(i) for i in range(256)])
+    # Add FC features from weighted features
+    fc6_a_out_name = add_wrapped_fc_layer(n, 'fc6-a', 'pool5_weighted', 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+
+    # Combined FC6 and FC7 features
+    n['fc6-sum'] = L.Eltwise(name='fc6-sum', bottom=[fc6_out_name, fc6_a_out_name], eltwise_param=fc6_sum_param)
+    fc7_out_name = add_wrapped_fc_layer(n, 'fc7-new', 'fc6-sum', 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+    # Prediction and loss layers
+    add_prediction_layers(n, 'pred_', fc7_out_name)
+    add_loss_acc_layers(n, ['pred_', 'label_'])
+
+    return n.to_proto()
+
+
+def create_model_u_fixed_conv(lmdb_paths, batch_size, crop_size=gv.g_images_resize_dim, imagenet_mean_file=gv.g_image_mean_binaryproto_file):
+    train_data_lmdb_path = lmdb_paths[0]
+    pool5_weight_maps_lmdb_path = lmdb_paths[1]
+    train_label_lmdb_path = lmdb_paths[2]
+    data_transform_param = dict(
+        crop_size=crop_size,
+        mean_file=imagenet_mean_file,
+        mirror=False
+    )
+
+    n = caffe.NetSpec()
+    # Data layers
+    n['data'] = L.Data(name='data', batch_size=batch_size, backend=P.Data.LMDB, source=train_data_lmdb_path, transform_param=data_transform_param)
+    n['pool5_weight_map'] = L.Data(name='pool5_weight_map', batch_size=batch_size, backend=P.Data.LMDB, source=pool5_weight_maps_lmdb_path)
+    n['label'] = L.Data(name='label', batch_size=batch_size, backend=P.Data.LMDB, source=train_label_lmdb_path)
+    n['label_class'], n['label_azimuth'], n['label_elevation'], n['label_tilt'] = L.Slice(name='labe-slice', bottom='label', ntop=4, slice_param=dict(
+        slice_dim=1, slice_point=[1,2,3]
+    ))
+    n['silence-label_class'] = L.Silence(name='silence-label_class', bottom='label_class', ntop=0)
+
+    # Parameters
+    conv1_conv_param = dict(num_output=96, kernel_size=11, stride=4)
+    pool1_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    conv2_conv_param = dict(num_output=256, pad=2, kernel_size=5, group=2)
+    pool2_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    conv3_conv_param = dict(num_output=384, pad=1, kernel_size=3)
+    conv4_conv_param = dict(num_output=384, pad=1, kernel_size=3, group=2)
+    conv5_conv_param = dict(num_output=256, pad=1, kernel_size=3, group=2)
+    pool5_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    pool5_weighted_param = dict(operation=P.Eltwise.PROD)
+
+    # Image (Render for CNN) features
+    conv1_out_name = add_wrapped_conv_layer(n, 'conv1', 'data', conv1_conv_param, param=NO_LEARN_PARAM, pooling_param=pool1_param, lrn_param=DEFAULT_LRN_PARAM)
+    conv2_out_name = add_wrapped_conv_layer(n, 'conv2', conv1_out_name, conv2_conv_param, param=NO_LEARN_PARAM, pooling_param=pool2_param, lrn_param=DEFAULT_LRN_PARAM)
+    conv3_out_name = add_wrapped_conv_layer(n, 'conv3', conv2_out_name, conv3_conv_param, param=NO_LEARN_PARAM)
+    conv4_out_name = add_wrapped_conv_layer(n, 'conv4', conv3_out_name, conv4_conv_param, param=NO_LEARN_PARAM)
+    conv5_out_name = add_wrapped_conv_layer(n, 'conv5', conv4_out_name, conv5_conv_param, param=NO_LEARN_PARAM, pooling_param=pool5_param)
+    fc6_out_name = add_wrapped_fc_layer(n, 'fc6', conv5_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+    fc7_out_name = add_wrapped_fc_layer(n, 'fc7', fc6_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+
+    # Get pool5 weighted features. First, slice channels
+    add_slice_layer(n, 'pool5', ['pool5_slice_' + str(i) for i in range(256)], dict(
+        axis=1, slice_point=range(1, 256)
+    ))
+    # Then weigh each channel by the map
+    for i in range(256):
+        slice_bottom_name = 'pool5_slice_' + str(i)
+        top_name = 'pool5_weighted_' + str(i)
+        n[top_name] = L.Eltwise(name=top_name, bottom=[slice_bottom_name, 'pool5_weight_map'], eltwise_param=pool5_weighted_param)
+    # Finally, combine weighted maps
+    n['pool5_weighted'] = L.Concat(name='pool5_weighted', bottom=['pool5_weighted_' + str(i) for i in range(256)])
+    # Add FC features from weighted features
+    fc6_a_out_name = add_wrapped_fc_layer(n, 'fc6-a', 'pool5_weighted', 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+    fc7_a_out_name = add_wrapped_fc_layer(n, 'fc7-a', fc6_a_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+
+    # Combined FC7 features
+    n['fc7-concat'] = L.Concat(name='fc7-concat', bottom=[fc7_out_name, fc7_a_out_name])
+    fc8_out_name = add_wrapped_fc_layer(n, 'fc8', 'fc7-concat', 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+    # Prediction and loss layers
+    add_prediction_layers(n, 'pred_', fc8_out_name)
+    add_loss_acc_layers(n, ['pred_', 'label_'])
+
+    return n.to_proto()
+
+
+'''
+LRN after pool5_weighted. High learning rate for fc6/7-a, fc8, and prediction layers. Fixed conv1-3 layers.
+'''
+def create_model_v(lmdb_paths, batch_size, crop_size=gv.g_images_resize_dim, imagenet_mean_file=gv.g_image_mean_binaryproto_file):
+    train_data_lmdb_path = lmdb_paths[0]
+    pool5_weight_maps_lmdb_path = lmdb_paths[1]
+    train_label_lmdb_path = lmdb_paths[2]
+    data_transform_param = dict(
+        crop_size=crop_size,
+        mean_file=imagenet_mean_file,
+        mirror=False
+    )
+
+    n = caffe.NetSpec()
+    # Data layers
+    n['data'] = L.Data(name='data', batch_size=batch_size, backend=P.Data.LMDB, source=train_data_lmdb_path, transform_param=data_transform_param)
+    n['pool5_weight_map'] = L.Data(name='pool5_weight_map', batch_size=batch_size, backend=P.Data.LMDB, source=pool5_weight_maps_lmdb_path)
+    n['label'] = L.Data(name='label', batch_size=batch_size, backend=P.Data.LMDB, source=train_label_lmdb_path)
+    n['label_class'], n['label_azimuth'], n['label_elevation'], n['label_tilt'] = L.Slice(name='labe-slice', bottom='label', ntop=4, slice_param=dict(
+        slice_dim=1, slice_point=[1,2,3]
+    ))
+    n['silence-label_class'] = L.Silence(name='silence-label_class', bottom='label_class', ntop=0)
+
+    # Parameters
+    conv1_conv_param = dict(num_output=96, kernel_size=11, stride=4)
+    pool1_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    conv2_conv_param = dict(num_output=256, pad=2, kernel_size=5, group=2)
+    pool2_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    conv3_conv_param = dict(num_output=384, pad=1, kernel_size=3)
+    conv4_conv_param = dict(num_output=384, pad=1, kernel_size=3, group=2)
+    conv5_conv_param = dict(num_output=256, pad=1, kernel_size=3, group=2)
+    pool5_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    pool5_weighted_param = dict(operation=P.Eltwise.PROD)
+    eltwise_sum_param = dict(operation=P.Eltwise.SUM)
+
+    # Image (Render for CNN) features
+    conv1_out_name = add_wrapped_conv_layer(n, 'conv1', 'data', conv1_conv_param, param=NO_LEARN_PARAM, pooling_param=pool1_param, lrn_param=DEFAULT_LRN_PARAM)
+    conv2_out_name = add_wrapped_conv_layer(n, 'conv2', conv1_out_name, conv2_conv_param, param=NO_LEARN_PARAM, pooling_param=pool2_param, lrn_param=DEFAULT_LRN_PARAM)
+    conv3_out_name = add_wrapped_conv_layer(n, 'conv3', conv2_out_name, conv3_conv_param, param=NO_LEARN_PARAM)
+    conv4_out_name = add_wrapped_conv_layer(n, 'conv4', conv3_out_name, conv4_conv_param, param=DEFAULT_DECAY_PARAM)
+    conv5_out_name = add_wrapped_conv_layer(n, 'conv5', conv4_out_name, conv5_conv_param, param=DEFAULT_DECAY_PARAM, pooling_param=pool5_param)
+    fc6_out_name = add_wrapped_fc_layer(n, 'fc6', conv5_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+    fc7_out_name = add_wrapped_fc_layer(n, 'fc7', fc6_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+
+    # Get pool5 attention vector. First, slice channels
+    add_slice_layer(n, 'pool5', ['pool5_slice_' + str(i) for i in range(256)], dict(
+        axis=1, slice_point=range(1, 256)
+    ))
+    # Then weigh each channel by the map
+    for i in range(256):
+        slice_bottom_name = 'pool5_slice_' + str(i)
+        top_name = 'pool5_weighted_' + str(i)
+        n[top_name] = L.Eltwise(name=top_name, bottom=[slice_bottom_name, 'pool5_weight_map'], eltwise_param=pool5_weighted_param)
+    # Combine weighted maps
+    n['pool5_weighted'] = L.Concat(name='pool5_weighted', bottom=['pool5_weighted_' + str(i) for i in range(256)])
+    n['pool5_weighted_lrn'] = lrn('pool5_weighted_lrn', 'pool5_weighted', DEFAULT_LRN_PARAM)
+    # Sum across width
+    add_slice_layer(n, 'pool5_weighted_lrn', ['pool5_weighted_slice_' + str(i) for i in range(6)], dict(
+        axis=3, slice_point=range(1, 6)
+    ))
+    n['pool5_weighted_a'] = L.Eltwise(name='pool5_weighted_a', bottom=['pool5_weighted_slice_' + str(i) for i in range(6)], eltwise_param=eltwise_sum_param)
+    # Sum across height
+    add_slice_layer(n, 'pool5_weighted_a', ['pool5_weighted_a_slice_' + str(i) for i in range(6)], dict(
+        axis=2, slice_point=range(1, 6)
+    ))
+    n['pool5_weighted_b'] = L.Eltwise(name='pool5_weighted_a', bottom=['pool5_weighted_a_slice_' + str(i) for i in range(6)], eltwise_param=eltwise_sum_param)
+    # Finally, flatten to get attention vector
+    n['pool5-a'] = L.Flatten(name='pool5-a', bottom='pool5_weighted_b')
+
+    # Concatenate fc7 with attention vector
+    n['fc7-concat'] = L.Concat(name='fc7-concat', bottom=[fc7_out_name, 'pool5-a'])
+    fc8_out_name = add_wrapped_fc_layer(n, 'fc8', 'fc7-concat', 4096, param=HIGHER_LR_MULT_PARAM, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+
+    # Prediction and loss layers
+    add_prediction_layers(n, 'pred_', fc8_out_name, param=HIGHER_LR_MULT_PARAM)
+    add_loss_acc_layers(n, ['pred_', 'label_'])
+
+    return n.to_proto()
+
+
+def create_model_w(lmdb_paths, batch_size, crop_size=gv.g_images_resize_dim, imagenet_mean_file=gv.g_image_mean_binaryproto_file):
+    train_data_lmdb_path = lmdb_paths[0]
+    keypoint_map_lmdb_path = lmdb_paths[1]
+    train_label_lmdb_path = lmdb_paths[2]
+    data_transform_param = dict(
+        crop_size=crop_size,
+        mean_file=imagenet_mean_file,
+        mirror=False
+    )
+
+    n = caffe.NetSpec()
+    # Data layers
+    n['data'] = L.Data(name='data', batch_size=batch_size, backend=P.Data.LMDB, source=train_data_lmdb_path, transform_param=data_transform_param)
+    n['keypoint_map'] = L.Data(name='keypoint_map', batch_size=batch_size, backend=P.Data.LMDB, source=keypoint_map_lmdb_path)
+    n['label'] = L.Data(name='label', batch_size=batch_size, backend=P.Data.LMDB, source=train_label_lmdb_path)
+    n['label_class'], n['label_azimuth'], n['label_elevation'], n['label_tilt'] = L.Slice(name='labe-slice', bottom='label', ntop=4, slice_param=dict(
+        slice_dim=1, slice_point=[1,2,3]
+    ))
+    n['silence-label_class'] = L.Silence(name='silence-label_class', bottom='label_class', ntop=0)
+
+    # Image (Render for CNN) features
+    conv1_param = dict(num_output=96, kernel_size=11, stride=4)
+    pool1_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    conv2_param = dict(num_output=256, pad=2, kernel_size=5, group=2)
+    pool2_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    conv3_param = dict(num_output=384, pad=1, kernel_size=3)
+    conv4_param = dict(num_output=384, pad=1, kernel_size=3, group=2)
+    conv5_param = dict(num_output=256, pad=1, kernel_size=3, group=2)
+    pool5_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    conv1_out_name = add_wrapped_conv_layer(n, 'conv1', 'data', conv1_param, pooling_param=pool1_param, lrn_param=DEFAULT_LRN_PARAM)
+    conv2_out_name = add_wrapped_conv_layer(n, 'conv2', conv1_out_name, conv2_param, pooling_param=pool2_param, lrn_param=DEFAULT_LRN_PARAM)
+    conv3_out_name = add_wrapped_conv_layer(n, 'conv3', conv2_out_name, conv3_param)
+    conv4_out_name = add_wrapped_conv_layer(n, 'conv4', conv3_out_name, conv4_param, param=DEFAULT_DECAY_PARAM)
+    conv5_out_name = add_wrapped_conv_layer(n, 'conv5', conv4_out_name, conv5_param, param=DEFAULT_DECAY_PARAM, pooling_param=pool5_param)
+    fc6_out_name = add_wrapped_fc_layer(n, 'fc6', conv5_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+    fc7_out_name = add_wrapped_fc_layer(n, 'fc7', fc6_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+
+    # Keypoint map features
+    pool_keypoint_map_param = dict(pool=P.Pooling.MAX, kernel_size=5, stride=5, pad=3)
+    n['pool_keypoint_map'] = L.Pooling(name='pool_keypoint_map', bottom='keypoint_map', pooling_param=pool_keypoint_map_param)
+    # n['flatten'] = L.Flatten(name='flatten', bottom='pool_keypoint_map')
+    fc_keypoint_map_name = add_wrapped_fc_layer(n, 'fc_keypoint_map', 'pool_keypoint_map', 2116, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+
+    # Fusion
+    n['fc7-concat'] = L.Concat(name='fc7-concat', bottom=[fc7_out_name, fc_keypoint_map_name])
+    fc8_out_name = add_wrapped_fc_layer(n, 'fc8', 'fc7-concat', 4096, param=HIGHER_LR_MULT_PARAM, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+
+    # Prediction and loss layers
+    add_prediction_layers(n, 'pred_', fc8_out_name, param=HIGHER_LR_MULT_PARAM)
+    add_loss_acc_layers(n, ['pred_', 'label_'])
+
+    return n.to_proto()
+
 def main():
     # Potential arguments
     # sub_lmdb_names = ['image_lmdb', 'viewpoint_label_lmdb']
-    # model_id = 'r4cnn'
-    # create_model_fn = create_model_r4cnn
     # input_data_shapes = dict(data=(1, 3, 227, 227))
+    # model_id = 'r4cnn_fc_from_scratch'
+    # create_model_fn = create_model_r4cnn_fc_from_scratch
 
-    sub_lmdb_names = ['image_lmdb', 'pool5_weight_maps_lmdb', 'viewpoint_label_lmdb']
-    model_id = 'r'
-    create_model_fn = create_model_r
-    input_data_shapes = dict(data=(1, 3, 227, 227), pool5_weight_map=(1, 1, 6, 6))
+    # sub_lmdb_names = ['image_lmdb', 'viewpoint_label_lmdb']
+    # input_data_shapes = dict(data=(1, 3, 227, 227))
+    # model_id = 'r4cnn_orig_train_proc_lmdb-new'
+    # create_model_fn = create_model_r4cnn_orig_train_proc
+
+    # sub_lmdb_names = ['image_lmdb', 'viewpoint_label_lmdb']
+    # input_data_shapes = dict(data=(1, 3, 227, 227))
+    # model_id = 'r4cnnp'
+    # create_model_fn = create_model_r4cnnp_fixed_conv
 
     # sub_lmdb_names = ['image_lmdb', 'pool5_weight_maps_lmdb', 'viewpoint_label_lmdb']
+    # input_data_shapes = dict(data=(1, 3, 227, 227), pool5_weight_map=(1, 1, 6, 6))
+    # model_id = 'r'
+    # create_model_fn = create_model_r
+
+    # sub_lmdb_names = ['image_lmdb', 'pool5_weight_maps_lmdb', 'viewpoint_label_lmdb']
+    # input_data_shapes = dict(data=(1, 3, 227, 227), pool5_weight_map=(1, 1, 6, 6))
     # model_id = 's'
     # create_model_fn = create_model_s
+
+    # sub_lmdb_names = ['image_lmdb', 'pool5_weight_maps_lmdb', 'viewpoint_label_lmdb']
     # input_data_shapes = dict(data=(1, 3, 227, 227), pool5_weight_map=(1, 1, 6, 6))
+    # model_id = 's2_prod'
+    # create_model_fn = create_model_s2
 
-    batch_size = 192
-    syn_stepsize = 200000
-    syn_max_iter = 200000
-    syn_base_lr = 0.00001
-    real_stepsize = 10000
-    real_max_iter = 10000
-    real_test_interval = 1000
+    # sub_lmdb_names = ['image_lmdb', 'pool5_weight_maps_lmdb', 'viewpoint_label_lmdb']
+    # input_data_shapes = dict(data=(1, 3, 227, 227), pool5_weight_map=(1, 1, 6, 6))
+    # model_id = 's_fast-fc-a'
+    # create_model_fn = create_model_s_fixed_conv
 
-    # Add learning rate to model ID
-    model_id = model_id + '_base_lr-' + str(syn_base_lr)
+    # sub_lmdb_names = ['image_lmdb', 'pool5_weight_maps_lmdb', 'viewpoint_label_lmdb']
+    # input_data_shapes = dict(data=(1, 3, 227, 227), pool5_weight_map=(1, 1, 6, 6))
+    # model_id = 's_fixed_conv_lrn'
+    # create_model_fn = create_model_s_fixed_conv_lrn
 
-    verify_net = False
+    # sub_lmdb_names = ['image_lmdb', 'pool5_weight_maps_lmdb', 'viewpoint_label_lmdb']
+    # input_data_shapes = dict(data=(1, 3, 227, 227), pool5_weight_map=(1, 1, 6, 6))
+    # model_id = 's_sum_fc-only_fc-scratch'
+    # create_model_fn = create_model_s_fixed_conv_scratch_fc
 
-    # Set LMDB paths
-    syn_lmdb_paths = [os.path.join(gv.g_corresp_syn_lmdb_folder, lmdb_name) for lmdb_name in sub_lmdb_names]
-    real_train_train_lmdb_paths = [os.path.join(gv.g_corresp_real_train_train_lmdb_folder, lmdb_name) for lmdb_name in sub_lmdb_names]
-    real_train_valid_lmdb_paths = [os.path.join(gv.g_corresp_real_train_val_lmdb_folder, lmdb_name) for lmdb_name in sub_lmdb_names]
-    # real_train_lmdb_paths = [os.path.join(gv.g_corresp_real_train_lmdb_folder, lmdb_name) for lmdb_name in sub_lmdb_names]
-    # real_test_lmdb_paths = [os.path.join(gv.g_corresp_real_test_lmdb_folder, lmdb_name) for lmdb_name in sub_lmdb_names]
+    # sub_lmdb_names = ['image_lmdb', 'pool5_weight_maps_lmdb', 'viewpoint_label_lmdb']
+    # input_data_shapes = dict(data=(1, 3, 227, 227), pool5_weight_map=(1, 1, 6, 6))
+    # model_id = 't_max_fc-only'
+    # create_model_fn = create_model_t_fixed_conv
 
-    # Define paths for solver and models for training on synthetic data
-    model_root = os.path.join(gv.g_corresp_model_root_folder, model_id)
-    model_syn_train_path = os.path.join(model_root, 'syn-train.prototxt')
-    solver_syn_path = os.path.join(model_root, 'solver_syn.prototxt')
+    # sub_lmdb_names = ['image_lmdb', 'pool5_weight_maps_lmdb', 'viewpoint_label_lmdb']
+    # input_data_shapes = dict(data=(1, 3, 227, 227), pool5_weight_map=(1, 1, 6, 6))
+    # model_id = 'u_fc-only'
+    # create_model_fn = create_model_u_fixed_conv
 
-    # Define paths for solver and models for fine-tuning on real data
-    model_real_train_path = os.path.join(model_root, 'real-train.prototxt')
-    model_real_test_path = os.path.join(model_root, 'real-test.prototxt')
-    solver_real_path = os.path.join(model_root, 'solver_real.prototxt')
+    sub_lmdb_names = ['image_lmdb', 'pool5_weight_maps_lmdb', 'viewpoint_label_lmdb']
+    input_data_shapes = dict(data=(1, 3, 227, 227), pool5_weight_map=(1, 1, 6, 6))
+    create_model_fn = create_model_v
 
-    # Define path to deploy prototxt
-    model_deploy_path = os.path.join(model_root, 'deploy.prototxt')
+    # Define the model
+    # sub_lmdb_names = ['image_lmdb', 'euclidean_dt_map_lmdb', 'viewpoint_label_lmdb']
+    # input_data_shapes = dict(data=(1, 3, 227, 227))
+    # create_model_fn = create_model_w
 
-    # Make model root folder if it doesn't exist
-    if not os.path.exists(model_root):
-        os.makedirs(model_root)
+    # Define initial weights
+    initial_weights_path = gv.g_render4cnn_weights_path
 
-    # Save synthetic training model prototxt
-    model_syn_train = create_model_fn(syn_lmdb_paths, batch_size)
-    with open(model_syn_train_path, 'w') as f:
-        f.write(str(model_syn_train))
-    # Save real training model prototxt
-    model_real_train = create_model_fn(real_train_train_lmdb_paths, batch_size)
-    with open(model_real_train_path, 'w') as f:
-        f.write(str(model_real_train))
-    # Save real test model prototxt
-    model_real_test = create_model_fn(real_train_valid_lmdb_paths, batch_size)
-    with open(model_real_test_path, 'w') as f:
-        f.write(str(model_real_test))
-    # Save deploy model prototxt
-    model_deploy_str = netspec_to_deploy_prototxt_str(model_syn_train, input_data_shapes)
-    with open(model_deploy_path, 'w') as f:
-        f.write(model_deploy_str)
+    # Define the training and test sets
+    # z_train_lmdb_root = gv.g_z_corresp_syn_train_lmdb_folder
+    # z_test_lmdb_root = gv.g_z_corresp_syn_val_lmdb_folder
+    # scratch_train_lmdb_root = gv.g_scratch_corresp_syn_train_lmdb_folder
+    # scratch_test_lmdb_root = gv.g_scratch_corresp_syn_val_lmdb_folder
+    z_train_lmdb_root = '/z/home/szetor/Documents/DENSO_VCA/RenderForCNN/data/lmdb/syn'
+    z_test_lmdb_root = '/z/home/szetor/Documents/DENSO_VCA/RenderForCNN/data/lmdb/real/test'
+    scratch_train_lmdb_root = z_train_lmdb_root.replace('/z/', '/scratch/')
+    scratch_test_lmdb_root = z_test_lmdb_root.replace('/z/', '/scratch/')
 
-    # Verify if needed
-    if verify_net:
-        verify_netspec(model_real_test)
+    # Get model ID by stripping 'create_model_' from the function name
+    model_id = create_model_fn.__name__.replace('create_model_', '')
+    # Set /z LMDB paths
+    z_train_lmdb_paths = [os.path.join(z_train_lmdb_root, lmdb_name) for lmdb_name in sub_lmdb_names]
+    z_test_lmdb_paths = [os.path.join(z_test_lmdb_root, lmdb_name) for lmdb_name in sub_lmdb_names]
+    # Set /scratch LMDB paths
+    scratch_train_lmdb_paths = [os.path.join(scratch_train_lmdb_root, lmdb_name) for lmdb_name in sub_lmdb_names]
+    scratch_test_lmdb_paths = [os.path.join(scratch_test_lmdb_root, lmdb_name) for lmdb_name in sub_lmdb_names]
 
-    # Save synthetic data solver parameters
-    syn_override_params = dict(
-        train_net=model_syn_train_path,
-        test_net=model_real_test_path,
-        snapshot_prefix='syn',
-        stepsize=syn_stepsize,
-        max_iter=syn_max_iter,
-        base_lr=syn_base_lr
+    # # Verify the models using the LMDBs on /z
+    # z_train_model = create_model_fn(z_train_lmdb_paths, BATCH_SIZE)
+    # verify_netspec(z_train_model)
+    # z_test_model = create_model_fn(z_test_lmdb_paths, BATCH_SIZE)
+    # verify_netspec(z_test_model)
+
+    # Get experiment folder names
+    exp_folder_names = filter(lambda x: x != 'snapshots', os.listdir(gv.g_experiments_root_folder))
+    # Get last experiment folder name
+    last_exp_folder_name = sorted(exp_folder_names)[-1]
+    # Extract experiment number
+    last_exp_num = int(last_exp_folder_name[:6])
+    cur_exp_num = last_exp_num + 1
+
+    # Get current date
+    date_str = time.strftime('%m-%d-%Y_%H:%M:%S')
+    # Combine current experiment number with time
+    cur_exp_folder_name = '%06d_%s' % (cur_exp_num, date_str)
+
+    # Create experiment folder and subfolders
+    cur_exp_folder_path = os.path.join(gv.g_experiments_root_folder, cur_exp_folder_name)
+    evaluation_path = os.path.join(cur_exp_folder_path, 'evaluation')
+    model_path = os.path.join(cur_exp_folder_path, 'model')
+    progress_path = os.path.join(cur_exp_folder_path, 'progress')
+    os.mkdir(cur_exp_folder_path)
+    os.mkdir(evaluation_path)
+    os.mkdir(model_path)
+    os.mkdir(progress_path)
+
+    # Create train and test model files
+    scratch_train_model = create_model_fn(scratch_train_lmdb_paths, BATCH_SIZE)
+    scratch_test_model = create_model_fn(scratch_test_lmdb_paths, BATCH_SIZE)
+    with open(os.path.join(model_path, 'train.prototxt'), 'w') as f:
+        f.write(str(scratch_train_model))
+    with open(os.path.join(model_path, 'test.prototxt'), 'w') as f:
+        f.write(str(scratch_test_model))
+    # Create deploy model file
+    deploy_model_str = netspec_to_deploy_prototxt_str(scratch_train_model, input_data_shapes)
+    with open(os.path.join(model_path, 'deploy.prototxt'), 'w') as f:
+        f.write(deploy_model_str)
+
+    # Save solver parameters
+    solver_override_params = dict(
+        train_net=os.path.join(model_path, 'train.prototxt'),
+        test_net=os.path.join(model_path, 'test.prototxt')
     )
-    syn_solver_params = merge_dicts(DEFAULT_SOLVER_DICT, syn_override_params)
-    syn_solver_str = dict_to_solver_text(syn_solver_params)
-    with open(solver_syn_path, 'w') as f:
-        f.write(syn_solver_str)
+    solver_params = merge_dicts(SYN_SOLVER_DICT, solver_override_params)
+    solver_str = dict_to_solver_text(solver_params)
+    with open(os.path.join(model_path, 'solver.prototxt'), 'w') as f:
+        f.write(solver_str)
 
-    # Save real data solver parameters
-    real_override_params = dict(
-        train_net=model_real_train_path,
-        test_net=model_real_test_path,
-        snapshot_prefix='real',
-        stepsize=real_stepsize,
-        max_iter=real_max_iter,
-        test_interval=real_test_interval
-    )
-    real_solver_params = merge_dicts(DEFAULT_SOLVER_DICT, real_override_params)
-    real_solver_str = dict_to_solver_text(real_solver_params)
-    with open(solver_real_path, 'w') as f:
-        f.write(real_solver_str)
+    ### CREATE TRAINING SCRIPT ###
+    with open(os.path.join(gv.g_corresp_model_root_folder, 'train_model.sh'), 'r') as f:
+        train_script_contents = f.read()
+    # Replace variables in script
+    train_script_contents = train_script_contents.replace('[[INITIAL_WEIGHTS]]', initial_weights_path)
+    train_script_contents = train_script_contents.replace('[[EXPERIMENT_FOLDER_NAME]]', cur_exp_folder_name)
+    train_script_contents = train_script_contents.replace('[[EXPERIMENTS_ROOT]]', gv.g_experiments_root_folder)
+    train_script_contents = train_script_contents.replace('[[SNAPSHOTS_ROOT]]', gv.g_experiments_snapshot_root_folder)
+    # Save script
+    with open(os.path.join(model_path, 'train.sh'), 'w') as f:
+        f.write(train_script_contents)
+    # Make script executable
+    os.chmod(os.path.join(model_path, 'train.sh'), 0744)
 
-    # Create synthetic training and real fine-tuning training scripts
-    shutil.copy(os.path.join(gv.g_corresp_model_root_folder, 'train_model.sh'), os.path.join(model_root, 'syn.sh'))
-    shutil.copy(os.path.join(gv.g_corresp_model_root_folder, 'train_model.sh'), os.path.join(model_root, 'real.sh'))
+    ### CREATE README FILE ###
+    with open(os.path.join(gv.g_corresp_model_root_folder, 'README.md.example'), 'r') as f:
+        readme_contents = f.read()
+    # Replace variables in script
+    readme_contents = readme_contents.replace('[[EXPERIMENT_NUM]]', str(cur_exp_num))
+    readme_contents = readme_contents.replace('[[MODEL_NAME]]', model_id)
+    readme_contents = readme_contents.replace('[[MODEL_DESCRIPTION]]', fn_desc_map.get(create_model_fn.__name__, 'N/A'))
+    readme_contents = readme_contents.replace('[[TRAIN_ROOT]]', scratch_train_lmdb_root)
+    readme_contents = readme_contents.replace('[[TEST_ROOT]]', scratch_test_lmdb_root)
+    # Populate other notes
+    num_conseq_empty_lines = 0
+    other_notes = ''
+    print('Enter other notes (press enter 3 times to exit):')
+    # Enter notes with up to two returns between paragraphs
+    while num_conseq_empty_lines < 3:
+        line = raw_input()
+        other_notes += '%s\n' % line
+        if not line:
+            num_conseq_empty_lines += 1
+    readme_contents = readme_contents.replace('[[OTHER_NOTES]]', other_notes.rstrip())
+
+    # Save readme
+    with open(os.path.join(cur_exp_folder_path, 'README.md'), 'w') as f:
+        f.write(readme_contents)
+
+    # Add NOT_STARTED file
+    with open(os.path.join(cur_exp_folder_path, 'NOT_STARTED'), 'w') as f:
+        f.write('')
 
 if __name__ == '__main__':
     main()
