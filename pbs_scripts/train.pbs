@@ -4,7 +4,7 @@
 #PBS -S /bin/bash
 #PBS -m abe
 #PBS -M szetor@umich.edu
-#PBS -v INITIAL_WEIGHTS,EXPERIMENT_FOLDER_NAME,EXPERIMENTS_ROOT,SNAPSHOTS_ROOT
+#PBS -v INITIAL_WEIGHTS,EXPERIMENT_FOLDER_NAME,EXPERIMENTS_ROOT
 
 # Set up Caffe and prereqs
 module load cuda cudnn opencv gflags glog boost
@@ -20,23 +20,20 @@ elif [ -z $EXPERIMENT_FOLDER_NAME ]; then
 elif [ -z $EXPERIMENTS_ROOT ]; then
 	echo "Error: EXPERIMENTS_ROOT undefined"
 	exit 1
-elif [ -z $SNAPSHOTS_ROOT ]; then
-	echo "Error: SNAPSHOTS_ROOT undefined"
-	exit 1
 fi
 
 # Derive relevant paths from environment
 EXPERIMENT_FULL_PATH="$EXPERIMENTS_ROOT/$EXPERIMENT_FOLDER_NAME"
 MODEL_PATH="$EXPERIMENT_FULL_PATH/model"
 PROGRESS_PATH="$EXPERIMENT_FULL_PATH/progress"
-SNAPSHOT_FULL_PATH="$SNAPSHOTS_ROOT/$EXPERIMENT_FOLDER_NAME"
+SNAPSHOTS_PATH="$EXPERIMENT_FULL_PATH/snapshots"
 
 # Indicate that experiment is running. Put PBS job ID in RUNNING file
 rm "$EXPERIMENT_FULL_PATH/NOT_STARTED"
 echo $PBS_JOBID > "$EXPERIMENT_FULL_PATH/RUNNING"
 # Start training
-mkdir -p "$SNAPSHOT_FULL_PATH"
-cd "$SNAPSHOT_FULL_PATH"
+mkdir -p "$SNAPSHOTS_PATH"
+cd "$SNAPSHOTS_PATH"
 $CAFFE train --solver="$MODEL_PATH/solver.prototxt" --weights="$INITIAL_WEIGHTS" \
 		2>&1 | tee "$PROGRESS_PATH/progress.log"
 

@@ -6,11 +6,6 @@ EXP_ROOT="$SCRIPT_DIR/../experiments"
 
 # Go through all experiments
 for EXP_FOLDER_NAME in `ls $EXP_ROOT`; do
-	# Skip snapshots dir
-	if [ "$EXP_FOLDER_NAME" == "snapshots" ]; then
-		continue
-	fi
-
 	# Only plot if experiment was run and wasn't flagged for plot skip
 	FULL_EXP_PATH="$EXP_ROOT/$EXP_FOLDER_NAME"
 	if ! [ -e "$FULL_EXP_PATH/DO_NOT_PLOT" ] && ! [ -e "$FULL_EXP_PATH/NOT_STARTED" ]; then

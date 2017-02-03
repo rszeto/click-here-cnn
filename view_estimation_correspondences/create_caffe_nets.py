@@ -1177,22 +1177,18 @@ def main():
 
     # sub_lmdb_names = ['image_lmdb', 'viewpoint_label_lmdb']
     # input_data_shapes = dict(data=(1, 3, 227, 227))
-    # model_id = 'r4cnn_orig_train_proc_lmdb-new'
     # create_model_fn = create_model_r4cnn_orig_train_proc
 
     # sub_lmdb_names = ['image_lmdb', 'viewpoint_label_lmdb']
     # input_data_shapes = dict(data=(1, 3, 227, 227))
-    # model_id = 'r4cnnp'
     # create_model_fn = create_model_r4cnnp_fixed_conv
 
     # sub_lmdb_names = ['image_lmdb', 'pool5_weight_maps_lmdb', 'viewpoint_label_lmdb']
     # input_data_shapes = dict(data=(1, 3, 227, 227), pool5_weight_map=(1, 1, 6, 6))
-    # model_id = 'r'
     # create_model_fn = create_model_r
 
     # sub_lmdb_names = ['image_lmdb', 'pool5_weight_maps_lmdb', 'viewpoint_label_lmdb']
     # input_data_shapes = dict(data=(1, 3, 227, 227), pool5_weight_map=(1, 1, 6, 6))
-    # model_id = 's'
     # create_model_fn = create_model_s
 
     # sub_lmdb_names = ['image_lmdb', 'pool5_weight_maps_lmdb', 'viewpoint_label_lmdb']
@@ -1225,27 +1221,27 @@ def main():
     # model_id = 'u_fc-only'
     # create_model_fn = create_model_u_fixed_conv
 
-    sub_lmdb_names = ['image_lmdb', 'pool5_weight_maps_lmdb', 'viewpoint_label_lmdb']
-    input_data_shapes = dict(data=(1, 3, 227, 227), pool5_weight_map=(1, 1, 6, 6))
-    create_model_fn = create_model_v
+    # sub_lmdb_names = ['image_lmdb', 'pool5_weight_maps_lmdb', 'viewpoint_label_lmdb']
+    # input_data_shapes = dict(data=(1, 3, 227, 227), pool5_weight_map=(1, 1, 6, 6))
+    # create_model_fn = create_model_v
 
     # Define the model
-    # sub_lmdb_names = ['image_lmdb', 'euclidean_dt_map_lmdb', 'viewpoint_label_lmdb']
-    # input_data_shapes = dict(data=(1, 3, 227, 227))
-    # create_model_fn = create_model_w
+    sub_lmdb_names = ['image_lmdb', 'euclidean_dt_map_lmdb', 'viewpoint_label_lmdb']
+    input_data_shapes = dict(data=(1, 3, 227, 227))
+    create_model_fn = create_model_w
 
     # Define initial weights
     initial_weights_path = gv.g_render4cnn_weights_path
 
     # Define the training and test sets
-    # z_train_lmdb_root = gv.g_z_corresp_syn_train_lmdb_folder
-    # z_test_lmdb_root = gv.g_z_corresp_syn_val_lmdb_folder
-    # scratch_train_lmdb_root = gv.g_scratch_corresp_syn_train_lmdb_folder
-    # scratch_test_lmdb_root = gv.g_scratch_corresp_syn_val_lmdb_folder
-    z_train_lmdb_root = '/z/home/szetor/Documents/DENSO_VCA/RenderForCNN/data/lmdb/syn'
-    z_test_lmdb_root = '/z/home/szetor/Documents/DENSO_VCA/RenderForCNN/data/lmdb/real/test'
-    scratch_train_lmdb_root = z_train_lmdb_root.replace('/z/', '/scratch/')
-    scratch_test_lmdb_root = z_test_lmdb_root.replace('/z/', '/scratch/')
+    z_train_lmdb_root = gv.g_z_corresp_syn_train_lmdb_folder
+    z_test_lmdb_root = gv.g_z_corresp_syn_val_lmdb_folder
+    scratch_train_lmdb_root = gv.g_scratch_corresp_syn_train_lmdb_folder
+    scratch_test_lmdb_root = gv.g_scratch_corresp_syn_val_lmdb_folder
+    # z_train_lmdb_root = '/z/home/szetor/Documents/DENSO_VCA/RenderForCNN/data/lmdb/syn'
+    # z_test_lmdb_root = '/z/home/szetor/Documents/DENSO_VCA/RenderForCNN/data/lmdb/real/test'
+    # scratch_train_lmdb_root = z_train_lmdb_root.replace('/z/', '/scratch/')
+    # scratch_test_lmdb_root = z_test_lmdb_root.replace('/z/', '/scratch/')
 
     # Get model ID by stripping 'create_model_' from the function name
     model_id = create_model_fn.__name__.replace('create_model_', '')
@@ -1256,19 +1252,22 @@ def main():
     scratch_train_lmdb_paths = [os.path.join(scratch_train_lmdb_root, lmdb_name) for lmdb_name in sub_lmdb_names]
     scratch_test_lmdb_paths = [os.path.join(scratch_test_lmdb_root, lmdb_name) for lmdb_name in sub_lmdb_names]
 
-    # # Verify the models using the LMDBs on /z
-    # z_train_model = create_model_fn(z_train_lmdb_paths, BATCH_SIZE)
-    # verify_netspec(z_train_model)
-    # z_test_model = create_model_fn(z_test_lmdb_paths, BATCH_SIZE)
-    # verify_netspec(z_test_model)
+    # Verify the models using the LMDBs on /z
+    z_train_model = create_model_fn(z_train_lmdb_paths, BATCH_SIZE)
+    verify_netspec(z_train_model)
+    z_test_model = create_model_fn(z_test_lmdb_paths, BATCH_SIZE)
+    verify_netspec(z_test_model)
 
     # Get experiment folder names
-    exp_folder_names = filter(lambda x: x != 'snapshots', os.listdir(gv.g_experiments_root_folder))
+    exp_folder_names = os.listdir(gv.g_experiments_root_folder)
     # Get last experiment folder name
-    last_exp_folder_name = sorted(exp_folder_names)[-1]
-    # Extract experiment number
-    last_exp_num = int(last_exp_folder_name[:6])
-    cur_exp_num = last_exp_num + 1
+    if len(exp_folder_names) != 0:
+        last_exp_folder_name = sorted(exp_folder_names)[-1]
+        # Extract experiment number
+        last_exp_num = int(last_exp_folder_name[:6])
+        cur_exp_num = last_exp_num + 1
+    else:
+        cur_exp_num = 1
 
     # Get current date
     date_str = time.strftime('%m-%d-%Y_%H:%M:%S')
@@ -1280,10 +1279,12 @@ def main():
     evaluation_path = os.path.join(cur_exp_folder_path, 'evaluation')
     model_path = os.path.join(cur_exp_folder_path, 'model')
     progress_path = os.path.join(cur_exp_folder_path, 'progress')
+    snapshots_path = os.path.join(cur_exp_folder_path, 'snapshots')
     os.mkdir(cur_exp_folder_path)
     os.mkdir(evaluation_path)
     os.mkdir(model_path)
     os.mkdir(progress_path)
+    os.mkdir(snapshots_path)
 
     # Create train and test model files
     scratch_train_model = create_model_fn(scratch_train_lmdb_paths, BATCH_SIZE)
@@ -1314,7 +1315,6 @@ def main():
     train_script_contents = train_script_contents.replace('[[INITIAL_WEIGHTS]]', initial_weights_path)
     train_script_contents = train_script_contents.replace('[[EXPERIMENT_FOLDER_NAME]]', cur_exp_folder_name)
     train_script_contents = train_script_contents.replace('[[EXPERIMENTS_ROOT]]', gv.g_experiments_root_folder)
-    train_script_contents = train_script_contents.replace('[[SNAPSHOTS_ROOT]]', gv.g_experiments_snapshot_root_folder)
     # Save script
     with open(os.path.join(model_path, 'train.sh'), 'w') as f:
         f.write(train_script_contents)
@@ -1333,13 +1333,12 @@ def main():
     # Populate other notes
     num_conseq_empty_lines = 0
     other_notes = ''
-    print('Enter other notes (press enter 3 times to exit):')
+    print('Enter other notes (press enter 3 times in a row to exit):')
     # Enter notes with up to two returns between paragraphs
-    while num_conseq_empty_lines < 3:
+    while num_conseq_empty_lines < 2:
         line = raw_input()
         other_notes += '%s\n' % line
-        if not line:
-            num_conseq_empty_lines += 1
+        num_conseq_empty_lines = (0 if line else num_conseq_empty_lines + 1)
     readme_contents = readme_contents.replace('[[OTHER_NOTES]]', other_notes.rstrip())
 
     # Save readme

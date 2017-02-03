@@ -4,11 +4,6 @@ EXP_ROOT="$SCRIPT_DIR/../experiments"
 
 # Go through all experiments
 for EXP_FOLDER_NAME in `ls $EXP_ROOT`; do
-	# Skip snapshots dir
-	if [ "$EXP_FOLDER_NAME" == "snapshots" ]; then
-		continue
-	fi
-
 	# Run experiment if NOT_STARTED file exists
 	FULL_EXP_PATH="$EXP_ROOT/$EXP_FOLDER_NAME"
 	if [ -e "$FULL_EXP_PATH/NOT_STARTED" ]; then
