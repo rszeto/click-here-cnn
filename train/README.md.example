@@ -1,6 +1,5 @@
 Experiment no. [[EXPERIMENT_NUM]]
 Model name: [[MODEL_NAME]]
-Model description: [[MODEL_DESCRIPTION]]
 Train root: [[TRAIN_ROOT]]
 Test root: [[TEST_ROOT]]
 Other notes:

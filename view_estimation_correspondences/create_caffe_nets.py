@@ -6,6 +6,8 @@ import shutil
 from collections import OrderedDict
 import time
 import tempfile
+import subprocess
+import pdb
 
 # Import global variables
 view_estimation_correspondences_path = os.path.dirname(os.path.abspath(__file__))
@@ -58,7 +60,7 @@ SYN_SOLVER_DICT = dict(
     momentum2=0.999,
     weight_decay=0.0005,
     snapshot=2000,
-    snapshot_prefix='syn',
+    snapshot_prefix='snapshot',
     solver_mode='GPU',
     type='Adam'
 )
@@ -76,7 +78,7 @@ REAL_VAL_SOLVER_DICT = dict(
     momentum2=0.999,
     weight_decay=0.0005,
     snapshot=11,
-    snapshot_prefix='real',
+    snapshot_prefix='snapshot',
     solver_mode='GPU',
     type='Adam'
 )
@@ -98,11 +100,6 @@ REAL_SOLVER_DICT = dict(
     solver_mode='GPU',
     type='Adam'
 )
-
-fn_desc_map = {
-    'create_model_w': 'Downsample keypoint map (5x5) and pass through fc layer. Concat to R4CNN fc7, pass to 1 hidden layer and then prediction'
-}
-
 
 
 '''
@@ -342,7 +339,6 @@ def delete_layer_by_name(net_param, layer_name):
 
 '''
 Create a deployment prototxt string from a NetParameter. This deletes "Data" layers and replaces them with "input" and "input_shape" fields, and deletes view softmax and accuracy layers.
-WARNING: This modifies the net_param argument. Only use this after the given NetParameter has been saved to disk.
 @args
     net_param (caffe.NetParameter): The network parameters to generate a deploy prototxt from
     data_shapes (dict<str, tuple>): A map from the layer name to the input shape
@@ -361,13 +357,15 @@ def netspec_to_deploy_prototxt_str(net_param, data_shapes):
             ret += '}\n'
         else:
             warn('netspec_to_deploy_prototxt_str: Skipping unavailable data layer ' + name)
+    # Create copy of net_param to modify
+    net_param_copy = caffe_pb2.NetParameter()
+    text_format.Merge(str(net_param), net_param_copy)
     # Delete data, softmax, and accuracy layers
-    net_param = net_param
     for layer_type in ['Data', 'Silence', 'SoftmaxWithViewLoss', 'AccuracyView']:
-        delete_layer_by_type(net_param, layer_type)
+        delete_layer_by_type(net_param_copy, layer_type)
     # Delete label slice layer
-    delete_layer_by_name(net_param, 'labe-slice')
-    ret += str(net_param)
+    delete_layer_by_name(net_param_copy, 'labe-slice')
+    ret += str(net_param_copy)
     return ret
 
 def create_model_r4cnn(lmdb_paths, batch_size, crop_size=gv.g_images_resize_dim, imagenet_mean_file=gv.g_image_mean_binaryproto_file):
@@ -1221,27 +1219,27 @@ def main():
     # model_id = 'u_fc-only'
     # create_model_fn = create_model_u_fixed_conv
 
-    # sub_lmdb_names = ['image_lmdb', 'pool5_weight_maps_lmdb', 'viewpoint_label_lmdb']
-    # input_data_shapes = dict(data=(1, 3, 227, 227), pool5_weight_map=(1, 1, 6, 6))
-    # create_model_fn = create_model_v
+    sub_lmdb_names = ['image_lmdb', 'pool5_weight_maps_lmdb', 'viewpoint_label_lmdb']
+    input_data_shapes = dict(data=(1, 3, 227, 227), pool5_weight_map=(1, 1, 6, 6))
+    create_model_fn = create_model_v
 
     # Define the model
-    sub_lmdb_names = ['image_lmdb', 'euclidean_dt_map_lmdb', 'viewpoint_label_lmdb']
-    input_data_shapes = dict(data=(1, 3, 227, 227))
-    create_model_fn = create_model_w
+    # sub_lmdb_names = ['image_lmdb', 'euclidean_dt_map_lmdb', 'viewpoint_label_lmdb']
+    # input_data_shapes = dict(data=(1, 3, 227, 227))
+    # create_model_fn = create_model_w
 
     # Define initial weights
     initial_weights_path = gv.g_render4cnn_weights_path
 
     # Define the training and test sets
-    z_train_lmdb_root = gv.g_z_corresp_syn_train_lmdb_folder
-    z_test_lmdb_root = gv.g_z_corresp_syn_val_lmdb_folder
-    scratch_train_lmdb_root = gv.g_scratch_corresp_syn_train_lmdb_folder
-    scratch_test_lmdb_root = gv.g_scratch_corresp_syn_val_lmdb_folder
-    # z_train_lmdb_root = '/z/home/szetor/Documents/DENSO_VCA/RenderForCNN/data/lmdb/syn'
-    # z_test_lmdb_root = '/z/home/szetor/Documents/DENSO_VCA/RenderForCNN/data/lmdb/real/test'
-    # scratch_train_lmdb_root = z_train_lmdb_root.replace('/z/', '/scratch/')
-    # scratch_test_lmdb_root = z_test_lmdb_root.replace('/z/', '/scratch/')
+    # z_train_lmdb_root = gv.g_z_corresp_syn_train_lmdb_folder
+    # z_test_lmdb_root = gv.g_z_corresp_syn_val_lmdb_folder
+    # scratch_train_lmdb_root = gv.g_scratch_corresp_syn_train_lmdb_folder
+    # scratch_test_lmdb_root = gv.g_scratch_corresp_syn_val_lmdb_folder
+    z_train_lmdb_root = '/z/home/szetor/Documents/DENSO_VCA/RenderForCNN/data/lmdb/syn'
+    z_test_lmdb_root = '/z/home/szetor/Documents/DENSO_VCA/RenderForCNN/data/lmdb/real/test'
+    scratch_train_lmdb_root = z_train_lmdb_root.replace('/z/', '/scratch/')
+    scratch_test_lmdb_root = z_test_lmdb_root.replace('/z/', '/scratch/')
 
     # Get model ID by stripping 'create_model_' from the function name
     model_id = create_model_fn.__name__.replace('create_model_', '')
@@ -1252,11 +1250,11 @@ def main():
     scratch_train_lmdb_paths = [os.path.join(scratch_train_lmdb_root, lmdb_name) for lmdb_name in sub_lmdb_names]
     scratch_test_lmdb_paths = [os.path.join(scratch_test_lmdb_root, lmdb_name) for lmdb_name in sub_lmdb_names]
 
-    # Verify the models using the LMDBs on /z
-    z_train_model = create_model_fn(z_train_lmdb_paths, BATCH_SIZE)
-    verify_netspec(z_train_model)
-    z_test_model = create_model_fn(z_test_lmdb_paths, BATCH_SIZE)
-    verify_netspec(z_test_model)
+    # # Verify the models using the LMDBs on /z
+    # z_train_model = create_model_fn(z_train_lmdb_paths, BATCH_SIZE)
+    # verify_netspec(z_train_model)
+    # z_test_model = create_model_fn(z_test_lmdb_paths, BATCH_SIZE)
+    # verify_netspec(z_test_model)
 
     # Get experiment folder names
     exp_folder_names = os.listdir(gv.g_experiments_root_folder)
@@ -1321,13 +1319,41 @@ def main():
     # Make script executable
     os.chmod(os.path.join(model_path, 'train.sh'), 0744)
 
+    # Add NOT_STARTED file
+    with open(os.path.join(cur_exp_folder_path, 'NOT_STARTED'), 'w') as f:
+        f.write('')
+
+    # Add net visualization
+    draw_net_script_path = os.path.join(gv.g_pycaffe_path, 'draw_net.py')
+    model_prototxt_path = os.path.join(model_path, 'train.prototxt')
+    visualization_path = os.path.join(cur_exp_folder_path, 'net.png')
+    subprocess.call(['python', draw_net_script_path, model_prototxt_path, visualization_path, '--rankdir', 'TB'])
+
+    # Add evaluation arguments file
+    with open(os.path.join(evaluation_path, 'evalAcc_args.txt'), 'w') as f:
+        # model_proto
+        f.write(os.path.join(model_path, 'deploy.prototxt') + os.linesep)
+        # model_weights (need to replace ### with iter number)
+        f.write(os.path.join(snapshots_path, 'snapshot_iter_###.caffemodel') + os.linesep)
+        # test_root
+        f.write(z_test_lmdb_root + os.linesep)
+        # output_keys (assumed to be three keys before loss and accuracy layers)
+        layer_names = map(lambda x: x.name, scratch_train_model.layer)        
+        for output_layer_name in layer_names[-9:-6]:
+            f.write(output_layer_name + os.linesep)
+        # lmdb_info
+        for i, lmdb_name in enumerate(sub_lmdb_names):
+            # Assume the ith data layer uses the ith LMDB
+            f.write(layer_names[i] + os.linesep)
+            f.write(lmdb_name + os.linesep)
+            f.write(('True' if lmdb_name == 'image_lmdb' else 'False') + os.linesep)
+
     ### CREATE README FILE ###
     with open(os.path.join(gv.g_corresp_model_root_folder, 'README.md.example'), 'r') as f:
         readme_contents = f.read()
     # Replace variables in script
     readme_contents = readme_contents.replace('[[EXPERIMENT_NUM]]', str(cur_exp_num))
     readme_contents = readme_contents.replace('[[MODEL_NAME]]', model_id)
-    readme_contents = readme_contents.replace('[[MODEL_DESCRIPTION]]', fn_desc_map.get(create_model_fn.__name__, 'N/A'))
     readme_contents = readme_contents.replace('[[TRAIN_ROOT]]', scratch_train_lmdb_root)
     readme_contents = readme_contents.replace('[[TEST_ROOT]]', scratch_test_lmdb_root)
     # Populate other notes
@@ -1344,10 +1370,6 @@ def main():
     # Save readme
     with open(os.path.join(cur_exp_folder_path, 'README.md'), 'w') as f:
         f.write(readme_contents)
-
-    # Add NOT_STARTED file
-    with open(os.path.join(cur_exp_folder_path, 'NOT_STARTED'), 'w') as f:
-        f.write('')
 
 if __name__ == '__main__':
     main()
