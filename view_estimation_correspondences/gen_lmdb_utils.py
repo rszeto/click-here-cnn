@@ -502,6 +502,8 @@ def create_tensor_lmdb(tensor_data_root, tensor_lmdb_root, keys):
                 tensor = np.load(full_path)
                 if tensor.dtype == np.float32:
                     tensor = tensor.astype(np.float)
+                if tensor.dtype == np.int32:
+                    tensor = tensor.astype(np.int)
                 datum = tensor_to_datum(tensor)
                 key, _ = os.path.splitext(os.path.basename(path))
                 txn.put(key.encode('ascii'), datum.SerializeToString())
