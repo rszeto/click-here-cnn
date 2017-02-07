@@ -23,4 +23,5 @@ experiments
 *\.idea*
 caffe-r4cnn/
 pbs_scripts/
-train/
+train/old/
+/train/progress_web_server/.env/
