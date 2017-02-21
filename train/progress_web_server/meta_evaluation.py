@@ -17,10 +17,17 @@ display_info = [('Mean accuracy', 6, True), ('Mean medErr', 7, False)]
 overall_perf_info = display_info[0]
 
 # Create mapping from models (i.e. weights for a given architecture) to values extracted from result file
-def get_model_values_map(exclude_experiments=None):
+def get_model_values_map(exclude_experiments=None, only_include_experiments=None):
     model_values_map = {}
 
-    for exp_name in os.listdir(EXP_ROOT):
+    if only_include_experiments:
+        exp_names = only_include_experiments
+    else:
+        exp_names = os.listdir(EXP_ROOT)
+        if exclude_experiments:
+            exp_names = filter(lambda x: not x in exclude_experiments, exp_names)
+
+    for exp_name in exp_names:
         if exclude_experiments and exp_name in exclude_experiments:
             continue
 
@@ -116,7 +123,7 @@ def sort_exps_by_overall_perf(model_values_map, overall_perf_info):
     return ret
 
 if __name__ == '__main__':
-    model_values_map = get_model_values_map()
+    model_values_map = get_model_values_map(only_include_experiments=['000027_02-20-2017_19:47:36'])
 
     # # Find best performing architecture + iter combos
     # for perf_info in display_info:

@@ -17,8 +17,8 @@ def get_status(exp_name):
 def extract_notes(exp_name):
     exp_full_path = os.path.join(EXP_ROOT, exp_name)
     with open(os.path.join(exp_full_path, 'README.md'), 'r') as f:
-        readme_contents = f.read()
-    m = re.search('Other notes:\s((.*\s*)*)', readme_contents)
+        readme_tag = f.read()
+    m = re.search('Other notes:\s((.*\s*)*)', readme_tag)
     return m.group(1)
 
 @route('/')
@@ -66,18 +66,31 @@ def progress(exp_name):
     title_tag = '<title>' + exp_name + '</title>'
     css_tag = '<link rel="stylesheet" href="/css" />'
 
+    # Add readme contents
     exp_full_path = os.path.join(EXP_ROOT, exp_name)
     with open(os.path.join(exp_full_path, 'README.md'), 'r') as f:
         readme_contents = f.read()
     readme_contents = readme_contents.replace(os.linesep, '<br>')
+    readme_tag = '<h1>Summary</h1>' + readme_contents
 
     # Add progress plot, if it exists
     if os.path.exists(os.path.join(exp_full_path, 'progress', 'plots.png')):
-        image_tag = '<img width="100%%" src="/progress/plot/%s" />' % exp_name
+        image_tag = '<h1>Training plot</h1><img width="100%%" src="/progress/plot/%s" />' % exp_name
     else:
         image_tag = ''
 
-    return title_tag + css_tag + readme_contents + '<br>' + image_tag
+    # Add evaluation results
+    evaluation_contents = ''
+    model_values_map = meta_evaluation.get_model_values_map(only_include_experiments=[exp_name])
+    if model_values_map:
+        evaluation_contents = '<h1>Evaluation results</h1>'
+        for perf_info in meta_evaluation.display_info:
+            evaluation_contents += '<h2>Models sorted by: %s</h2>' % perf_info[0]
+            overall_perf_tuples = meta_evaluation.sort_models_by_indiv_perf(model_values_map, perf_info)
+            for exp_num, iter_num, best_overall_perf in overall_perf_tuples[:5]:
+                evaluation_contents += '%f (iter %d)<br>' % (best_overall_perf, iter_num)
+    
+    return title_tag + css_tag  + image_tag + readme_tag + evaluation_contents
 
 @route('/progress/plot/<exp_name>')
 def plot(exp_name):
