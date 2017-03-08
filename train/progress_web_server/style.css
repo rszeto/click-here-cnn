@@ -11,6 +11,10 @@ td {
 	padding: 7px;
 }
 
+td:nth-child(3) {
+	max-width: 1000px;
+}
+
 .running {
 	background-color: #AAFFAA;
 }

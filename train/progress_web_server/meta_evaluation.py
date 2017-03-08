@@ -2,6 +2,7 @@ import os
 import re
 import pdb
 import numpy as np
+import glob
 
 SCRIPT_DIR = os.path.abspath(os.path.dirname(__file__))
 EXP_ROOT = os.path.join(SCRIPT_DIR, '..', '..', 'experiments')
@@ -12,7 +13,8 @@ EXCLUDE_EXPERIMENTS = [
 ]
 
 # Array of tuples specifying name for value, index in the values array, and whether to reverse-sort
-display_info = [('Mean accuracy', 6, True), ('Mean medErr', 7, False)]
+display_info = [('Mean accuracy', -2, True), ('Mean medErr', -1, False)]
+# display_info = [('Mean accuracy', 6, True), ('Mean medErr', 7, False)]
 # Tuple specifying value to define overall performance with
 overall_perf_info = display_info[0]
 
@@ -37,7 +39,7 @@ def get_model_values_map(exclude_experiments=None, only_include_experiments=None
         exp_eval_path = os.path.join(EXP_ROOT, exp_name, 'evaluation')
         for acc_mederr_file_name in os.listdir(exp_eval_path):
             # Skip arguments file
-            if acc_mederr_file_name == 'evalAcc_args.txt':
+            if acc_mederr_file_name == 'evalAcc_args.txt' or 'cache' in acc_mederr_file_name:
                 continue
             # Get iteration number
             iter_num = int(re.findall('\d+', acc_mederr_file_name)[0])
@@ -85,7 +87,10 @@ def sort_exps_by_overall_perf(model_values_map, overall_perf_info):
         exp_num, iter_num = model_key
         best_exp_overall_perf = exp_best_overall_perf_map.get(exp_num, None)
         # Get performance metric of current experiment and iter num
-        exp_overall_perf = values[index]
+        try:
+            exp_overall_perf = values[index]
+        except:
+            pdb.set_trace()
         # Set as best performance if experiment wasn't seen
         if best_exp_overall_perf is None:
             exp_best_overall_perf_map[exp_num] = exp_overall_perf
