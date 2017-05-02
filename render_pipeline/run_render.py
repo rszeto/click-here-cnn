@@ -19,12 +19,6 @@ from global_variables import *
 from render_helper import *
 
 if __name__ == '__main__':
-    # Get parallelization parameters from environment if available
-    hostname = socket.gethostname()
-    rank = int(os.environ['PBS_VNODENUM']) if 'PBS_VNODENUM' in os.environ.keys() else 0
-    num_procs = int(os.environ['PBS_NUM_NODES']) if 'PBS_NUM_NODES' in os.environ.keys() else 1
-    print('Hostname: %s\nRank: %d\nNum procs: %d' % (hostname, rank, num_procs))
-
     if not os.path.exists(g_syn_images_folder):
         os.mkdir(g_syn_images_folder) 
 
@@ -42,20 +36,17 @@ if __name__ == '__main__':
         tmp_dirnames.append(tmp_dirname)
 
     print('%d commands found' % len(all_commands))
-
-    # Get the commands that this processor should handle
-    num_commands_per_proc = len(all_commands)/num_procs
-    proc_commands = all_commands[rank*num_commands_per_proc:(rank+1)*num_commands_per_proc]
+    print(all_commands[0])
 
     # Run the commands
     print('Rendering, it takes long time...')
     report_step = 100
     pool = Pool(g_syn_rendering_thread_num)
-    for idx, return_code in enumerate(pool.imap(partial(call, shell=True), proc_commands)):
+    for idx, return_code in enumerate(pool.imap(partial(call, shell=True), all_commands)):
         if idx % report_step == 0:
-            print('[%s] Rendering command %d of %d' % (datetime.datetime.now().time(), idx, len(proc_commands)))
+            print('[%s] Rendering command %d of %d' % (datetime.datetime.now().time(), idx, len(all_commands)))
         if return_code != 0:
-            print('Rendering command %d of %d (\"%s\") failed' % (idx, len(proc_commands), proc_commands[idx]))
+            print('Rendering command %d of %d (\"%s\") failed' % (idx, len(all_commands), all_commands[idx]))
 
     # Remove temporary directories
     for tmp_dirname in tmp_dirnames:
