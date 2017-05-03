@@ -258,14 +258,22 @@ def padImage(image, pad_size, pad_value):
     padded_tr = np.pad(image_tr, ((0, 0), (pad_size, pad_size), (pad_size, pad_size)), 'constant', constant_values=pad_value)
     return padded_tr.transpose(1, 2, 0)
 
-def create_syn_image_keypoint_csv():
+def create_syn_image_keypoint_csvs():
     # Make folder to store image-keypoint CSV file if needed
     if not os.path.exists(gv.g_image_keypoint_info_folder):
         os.mkdir(gv.g_image_keypoint_info_folder)
 
-    infoFile = open(gv.g_syn_image_keypoint_info_file, 'w')
-    infoFile.write(INFO_FILE_HEADER)
-    imgNamePattern = re.compile('(.*)_(.*)_a(.*)_e(.*)_t(.*)_d(.*).jpg')
+    # Create info files
+    syn_train_info_file = open(gv.g_syn_train_image_keypoint_info_file, 'w')
+    syn_train_info_file.write(INFO_FILE_HEADER)
+    syn_test_info_file = open(gv.g_syn_test_image_keypoint_info_file, 'w')
+    syn_test_info_file.write(INFO_FILE_HEADER)
+
+    image_name_pattern = re.compile('(.*)_(.*)_a(.*)_e(.*)_t(.*)_d(.*).jpg')
+
+    # Count how many images were processed; switch from test to train when count exceeds threshold
+    test_image_count = 0
+
     for synset in os.listdir(gv.g_syn_images_bkg_overlaid_folder):
         for md5 in os.listdir(os.path.join(gv.g_syn_images_bkg_overlaid_folder, synset)):
             for image_path in glob(os.path.join(gv.g_syn_images_bkg_overlaid_folder, synset, md5, '*.jpg')):
@@ -279,7 +287,7 @@ def create_syn_image_keypoint_csv():
 
                 # Extract azimuth, elevation, rotation from file name
                 image_name = os.path.basename(image_path)
-                m = re.match(imgNamePattern, image_name)
+                m = re.match(image_name_pattern, image_name)
                 azimuth, elevation, tilt = m.group(3, 4, 5)
 
                 # Get CSV that lists keypoint locations in the image
@@ -298,9 +306,17 @@ def create_syn_image_keypoint_csv():
                             view2label(tilt, object_class)
                         )
                         keyptStr = keypointInfo2Str(image_path, bbox, keypoint_loc, keypoint_class, finalLabel)
-                        infoFile.write(keyptStr)
 
-    infoFile.close()
+                        # Write to either syn test or syn train file
+                        if test_image_count >= gv.g_max_num_syn_test_images:
+                            syn_train_info_file.write(keyptStr)
+                        else:
+                            syn_test_info_file.write(keyptStr)
+
+                # Increment count
+                test_image_count += 1
+
+    syn_train_info_file.close()
 
 def create_pascal_image_keypoint_csvs():
     # Generate train and test lists and store in file

@@ -49,7 +49,7 @@ def generate_lmdb_data(info_file_path, lmdb_data_root, reverse, num_workers=NUM_
     lmdb_data_paths = dict(
         data=os.path.join(lmdb_data_root, 'image'),
         binary_kp_map=os.path.join(lmdb_data_root, 'keypoint_loc'),
-        gaussian_kp_class_vector=os.path.join(lmdb_data_root, 'gaussian_keypoint_map'),
+        gaussian_kp_map=os.path.join(lmdb_data_root, 'gaussian_keypoint_map'),
         keypoint_class_vector=os.path.join(lmdb_data_root, 'keypoint_class'),
         viewpoint_label=os.path.join(lmdb_data_root, 'viewpoint_label'),
         euclidean_dt_map=os.path.join(lmdb_data_root, 'euclidean_dt_map'),
@@ -126,7 +126,7 @@ def save_data_for_job(job, lmdb_data_paths):
     imsave(path, binary_map)
 
     gaussian_map = job_to_gaussian_keypoint_map(job)
-    path = os.path.join(lmdb_data_paths['gaussian_kp_class_vector'], job_key + '.png')
+    path = os.path.join(lmdb_data_paths['gaussian_kp_map'], job_key + '.png')
     imsave(path, gaussian_map)
 
     keypoint_class_vector = job_to_keypoint_class_vector(job)
@@ -255,6 +255,7 @@ def job_to_gaussian_keypoint_map(job):
     keypoint_image = keypoint_image / np.max(keypoint_image) * 1e6
     # Generate Gaussian map by convolving the binary map
     gaussian_keypoint_image = gaussian_filter(keypoint_image, SIGMA, mode='constant')
+    # Normalize so the maximum value is 1
     gaussian_keypoint_image = gaussian_keypoint_image / np.max(gaussian_keypoint_image)
 
     return gaussian_keypoint_image
@@ -402,11 +403,13 @@ def join_paths(base, dir):
 
 if __name__ == '__main__':
     # Create CSVs
-    utils.create_syn_image_keypoint_csv()
+    utils.create_syn_image_keypoint_csvs()
     utils.create_pascal_image_keypoint_csvs()
 
-    # Generate synthetic data with data augmentation (horizontal flip)
-    generate_lmdb_data(g_syn_image_keypoint_info_file, g_corresp_syn_lmdb_data_folder, True)
+    # Generate synthetic train data with data augmentation (horizontal flip)
+    generate_lmdb_data(g_syn_train_image_keypoint_info_file, g_corresp_syn_train_lmdb_data_folder, True)
+    # Generate synthetic test data with no data augmentation
+    generate_lmdb_data(g_syn_test_image_keypoint_info_file, g_corresp_syn_test_lmdb_data_folder, False)
     # Create PASCAL training data with data augmentation (horizontal flip)
     generate_lmdb_data(g_pascal_train_image_keypoint_info_file, g_corresp_pascal_train_lmdb_data_folder, True)
     # Create PASCAL test data without data augmentation
