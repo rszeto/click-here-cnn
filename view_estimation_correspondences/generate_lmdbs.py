@@ -2,6 +2,7 @@ import os
 import sys
 import time
 from multiprocessing import Process
+import re
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(BASE_DIR)
@@ -33,9 +34,6 @@ def generate_lmdb_from_data(lmdb_data_root, lmdb_root, keys):
     viewpoint_label_data_root = os.path.join(lmdb_data_root, 'viewpoint_label')
     viewpoint_label_lmdb_root = os.path.join(lmdb_root, 'viewpoint_label_lmdb')
 
-    pool5_weight_map_data_root = os.path.join(lmdb_data_root, 'weight_maps', 'pool5')
-    pool5_weight_map_lmdb_root = os.path.join(lmdb_root, 'pool5_weight_maps_lmdb')
-
     euclidean_dt_map_data_root = os.path.join(lmdb_data_root, 'euclidean_dt_map')
     euclidean_dt_map_lmdb_root = os.path.join(lmdb_root, 'euclidean_dt_map_lmdb')
 
@@ -48,18 +46,38 @@ def generate_lmdb_from_data(lmdb_data_root, lmdb_root, keys):
     zero_keypoint_map_data_root = os.path.join(lmdb_data_root, 'zero_keypoint_map')
     zero_keypoint_map_lmdb_root = os.path.join(lmdb_root, 'zero_keypoint_map_lmdb')
 
+    zero_keypoint_class_data_root = os.path.join(lmdb_data_root, 'zero_keypoint_class')
+    zero_keypoint_class_lmdb_root = os.path.join(lmdb_root, 'zero_keypoint_class_lmdb')
+
+    gaussian_attn_map_data_root = os.path.join(lmdb_data_root, 'gaussian_attn_map')
+    gaussian_attn_map_lmdb_root = os.path.join(lmdb_root, 'gaussian_attn_map_lmdb')
+
+    perturbation_sigmas = range(5, 50, 5)
+    keypoint_map_perturbed_data_roots = [os.path.join(lmdb_data_root, 'perturbed_%d_chessboard_dt_map' % perturb_sigma) for perturb_sigma in perturbation_sigmas]
+    keypoint_map_perturbed_lmdb_roots = [os.path.join(lmdb_root, 'perturbed_%d_chessboard_dt_map_lmdb' % perturb_sigma) for perturb_sigma in perturbation_sigmas]
+
     # Create and run all the LMDB creation processes in parallel
     processes = []
+    # Image
     processes.append(Process(target=utils.create_image_lmdb, args=(image_data_root, image_lmdb_root, keys)))
+    # Keypoint maps
     processes.append(Process(target=utils.create_image_lmdb, args=(binary_keypoint_map_data_root, binary_keypoint_map_lmdb_root, keys)))
     processes.append(Process(target=utils.create_image_lmdb, args=(gaussian_keypoint_map_data_root, gaussian_keypoint_map_lmdb_root, keys)))
-    processes.append(Process(target=utils.create_vector_lmdb, args=(keypoint_class_data_root, keypoint_class_lmdb_root, keys)))
-    processes.append(Process(target=utils.create_vector_lmdb, args=(viewpoint_label_data_root, viewpoint_label_lmdb_root, keys)))
-    processes.append(Process(target=utils.create_tensor_lmdb, args=(pool5_weight_map_data_root, pool5_weight_map_lmdb_root, keys)))
     processes.append(Process(target=utils.create_tensor_lmdb, args=(euclidean_dt_map_data_root, euclidean_dt_map_lmdb_root, keys)))
     processes.append(Process(target=utils.create_tensor_lmdb, args=(manhattan_dt_map_data_root, manhattan_dt_map_lmdb_root, keys)))
     processes.append(Process(target=utils.create_tensor_lmdb, args=(chessboard_dt_map_data_root, chessboard_dt_map_lmdb_root, keys)))
+    # Keypoint class
+    processes.append(Process(target=utils.create_vector_lmdb, args=(keypoint_class_data_root, keypoint_class_lmdb_root, keys)))
+    # Viewpoint labels
+    processes.append(Process(target=utils.create_vector_lmdb, args=(viewpoint_label_data_root, viewpoint_label_lmdb_root, keys)))
+    # Zeroed-out keypoint map and class
     processes.append(Process(target=utils.create_tensor_lmdb, args=(zero_keypoint_map_data_root, zero_keypoint_map_lmdb_root, keys)))
+    processes.append(Process(target=utils.create_vector_lmdb, args=(zero_keypoint_class_data_root, zero_keypoint_class_lmdb_root, keys)))
+    # Gaussian skip-connection
+    processes.append(Process(target=utils.create_tensor_lmdb, args=(gaussian_attn_map_data_root, gaussian_attn_map_lmdb_root, keys)))
+    # Perturbed keypoint maps
+    for i, sigma in enumerate(perturbation_sigmas):
+        processes.append(Process(target=utils.create_image_lmdb, args=(keypoint_map_perturbed_data_roots[i], keypoint_map_perturbed_lmdb_roots[i], keys)))
 
     for p in processes:
         p.start()
@@ -70,34 +88,20 @@ def generate_lmdb_from_data(lmdb_data_root, lmdb_root, keys):
     utils.print_elapsed_time(start)
     print
 
+
+def generate_lmdb(data_root_path, lmdb_root_path):
+    keys_path = os.path.join(data_root_path, 'keys.txt')
+    with open(keys_path, 'r') as f:
+        keys = [line.strip() for line in f.readlines()]
+    generate_lmdb_from_data(data_root_path, lmdb_root_path, keys)
+
+
 if __name__ == '__main__':
-    for mode in sys.argv[1:]:
-        if mode == 'syn/train':
-            # Generate syn LMDB
-            with open(os.path.join(gv.g_corresp_syn_lmdb_data_folder, 'keys_train.txt'), 'r') as f:
-                keys = [line.strip() for line in f.readlines()]
-            generate_lmdb_from_data(gv.g_corresp_syn_lmdb_data_folder, gv.g_z_corresp_syn_train_lmdb_folder, keys)
-        elif mode == 'syn/val':
-            with open(os.path.join(gv.g_corresp_syn_lmdb_data_folder, 'keys_val.txt'), 'r') as f:
-                keys = [line.strip() for line in f.readlines()]
-            generate_lmdb_from_data(gv.g_corresp_syn_lmdb_data_folder, gv.g_z_corresp_syn_val_lmdb_folder, keys)
-        elif mode == 'real/train':
-            # Generate PASCAL full train LMDB
-            with open(os.path.join(gv.g_corresp_real_train_lmdb_data_folder, 'keys.txt'), 'r') as f:
-                keys = [line.strip() for line in f.readlines()]
-            generate_lmdb_from_data(gv.g_corresp_real_train_lmdb_data_folder, gv.g_z_corresp_real_train_lmdb_folder, keys)
-        elif mode == 'real/train_train':
-            # Generate PASCAL train split LMDB
-            with open(os.path.join(gv.g_corresp_real_train_train_lmdb_data_folder, 'keys.txt'), 'r') as f:
-                keys = [line.strip() for line in f.readlines()]
-            generate_lmdb_from_data(gv.g_corresp_real_train_train_lmdb_data_folder, gv.g_z_corresp_real_train_train_lmdb_folder, keys)
-        elif mode == 'real/train_val':
-            # Generate PASCAL validation split LMDB
-            with open(os.path.join(gv.g_corresp_real_train_val_lmdb_data_folder, 'keys.txt'), 'r') as f:
-                keys = [line.strip() for line in f.readlines()]
-            generate_lmdb_from_data(gv.g_corresp_real_train_val_lmdb_data_folder, gv.g_z_corresp_real_train_val_lmdb_folder, keys)
-        elif mode == 'real/test':
-            # Generate PASCAL test LMDB
-            with open(os.path.join(gv.g_corresp_real_test_lmdb_data_folder, 'keys.txt'), 'r') as f:
-                keys = [line.strip() for line in f.readlines()]
-            generate_lmdb_from_data(gv.g_corresp_real_test_lmdb_data_folder, gv.g_z_corresp_real_test_lmdb_folder, keys)
+
+    # Synthetic data
+    generate_lmdb(gv.g_corresp_syn_lmdb_data_folder, gv.g_corresp_syn_train_lmdb_folder)
+    # PASCAL training data
+    generate_lmdb(gv.g_corresp_pascal_train_lmdb_data_folder, gv.g_corresp_pascal_train_lmdb_folder)
+    # PASCAL test data
+    generate_lmdb(gv.g_corresp_pascal_test_lmdb_data_folder, gv.g_corresp_pascal_test_lmdb_folder)
+
