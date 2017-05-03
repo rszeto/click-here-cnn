@@ -19,11 +19,11 @@ import pdb
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(BASE_DIR)
 sys.path.append(os.path.dirname(BASE_DIR))
-import global_variables as gv
+from global_variables import *
 import gen_lmdb_utils as utils
 
 # Import Caffe
-sys.path.append(gv.g_pycaffe_path)
+sys.path.append(g_pycaffe_path)
 import caffe
 from caffe.proto import caffe_pb2
 from google.protobuf import text_format
@@ -31,36 +31,50 @@ from google.protobuf import text_format
 # How wide the Gaussian kernel should be
 SIGMA = 23
 # The number of workers
-NUM_WORKERS = 20
+NUM_WORKERS = 30
 
 ACTIVATION_WEIGHT_MAP_CACHE = {}
 
 def generate_lmdb_data(info_file_path, lmdb_data_root, reverse, num_workers=NUM_WORKERS):
+    # Seed RNG to replicate LMDB generation for debugging
+    random.seed(123)
+    
+    # Print initial info
     start = time.time()
     print('Generating LMDB data from CSV')
     print('Info file path: %s' % info_file_path)
     print('LMDB data root: %s' % lmdb_data_root)
     print('Start date: %s\n' % time.asctime(time.localtime(start)))
 
-    data_path = os.path.join(lmdb_data_root, 'image')
-    binary_keypoint_image_path = os.path.join(lmdb_data_root, 'keypoint_loc')
-    gaussian_keypoint_image_path = os.path.join(lmdb_data_root, 'gaussian_keypoint_map')
-    keypoint_class_vector_path = os.path.join(lmdb_data_root, 'keypoint_class')
-    viewpoint_label_path = os.path.join(lmdb_data_root, 'viewpoint_label')
-    euclidean_dt_path = os.path.join(lmdb_data_root, 'euclidean_dt_map')
-    manhattan_dt_path = os.path.join(lmdb_data_root, 'manhattan_dt_map')
-    chessboard_dt_path = os.path.join(lmdb_data_root, 'chessboard_dt_map')
-    zero_keypoint_path = os.path.join(lmdb_data_root, 'zero_keypoint_map')
+    lmdb_data_paths = dict(
+        data=os.path.join(lmdb_data_root, 'image'),
+        binary_kp_map=os.path.join(lmdb_data_root, 'keypoint_loc'),
+        gaussian_kp_class_vector=os.path.join(lmdb_data_root, 'gaussian_keypoint_map'),
+        keypoint_class_vector=os.path.join(lmdb_data_root, 'keypoint_class'),
+        viewpoint_label=os.path.join(lmdb_data_root, 'viewpoint_label'),
+        euclidean_dt_map=os.path.join(lmdb_data_root, 'euclidean_dt_map'),
+        manhattan_dt_map=os.path.join(lmdb_data_root, 'manhattan_dt_map'),
+        chessboard_dt_map=os.path.join(lmdb_data_root, 'chessboard_dt_map'),
+        zero_keypoint_map=os.path.join(lmdb_data_root, 'zero_keypoint_map'),
+        zero_keypoint_class=os.path.join(lmdb_data_root, 'zero_keypoint_class'),
+        gaussian_attn_map=os.path.join(lmdb_data_root, 'gaussian_attn_map'),
+        perturbed_5_chessboard_dt_map=os.path.join(lmdb_data_root, 'perturbed_5_chessboard_dt_map'),
+        perturbed_10_chessboard_dt_map=os.path.join(lmdb_data_root, 'perturbed_10_chessboard_dt_map'),
+        perturbed_15_chessboard_dt_map=os.path.join(lmdb_data_root, 'perturbed_15_chessboard_dt_map'),
+        perturbed_20_chessboard_dt_map=os.path.join(lmdb_data_root, 'perturbed_20_chessboard_dt_map'),
+        perturbed_25_chessboard_dt_map=os.path.join(lmdb_data_root, 'perturbed_25_chessboard_dt_map'),
+        perturbed_30_chessboard_dt_map=os.path.join(lmdb_data_root, 'perturbed_30_chessboard_dt_map'),
+        perturbed_35_chessboard_dt_map=os.path.join(lmdb_data_root, 'perturbed_35_chessboard_dt_map'),
+        perturbed_40_chessboard_dt_map=os.path.join(lmdb_data_root, 'perturbed_40_chessboard_dt_map'),
+        perturbed_45_chessboard_dt_map=os.path.join(lmdb_data_root, 'perturbed_45_chessboard_dt_map')
+    )
 
-    all_data_paths = [data_path, binary_keypoint_image_path, gaussian_keypoint_image_path, keypoint_class_vector_path, viewpoint_label_path, euclidean_dt_path, manhattan_dt_path, chessboard_dt_path, zero_keypoint_path]
-
-    if not os.path.exists(lmdb_data_root):
-        os.makedirs(lmdb_data_root)
-    for path in all_data_paths:
+    # Create folders under the data root
+    for path in lmdb_data_paths.values():
         if not os.path.exists(path):
             os.makedirs(path)
 
-    # Read the data info from the file
+    # Read the data info from the CSV file
     print('Reading data info file')
     with open(info_file_path) as info_file:
         lines = info_file.readlines()
@@ -80,7 +94,7 @@ def generate_lmdb_data(info_file_path, lmdb_data_root, reverse, num_workers=NUM_
     # Start multithreading pool
     pool = multiprocessing.Pool(num_workers)
     # Save data to disk
-    save_data_for_job_p = partial(save_data_for_job, data_root=data_path, binary_kp_map_root=binary_keypoint_image_path, gaussian_kp_class_vector_root=gaussian_keypoint_image_path, keypoint_class_vector_root=keypoint_class_vector_path, viewpoint_label_root=viewpoint_label_path, euclidean_dt_map_root=euclidean_dt_path, manhattan_dt_map_root=manhattan_dt_path, chessboard_dt_map_root=chessboard_dt_path, zero_keypoint_map_root=zero_keypoint_path)
+    save_data_for_job_p = partial(save_data_for_job, lmdb_data_paths=lmdb_data_paths)
     pool_results = pool.imap(save_data_for_job_p, all_jobs)
     # Print progress
     for i, _ in enumerate(pool_results):
@@ -100,43 +114,59 @@ def generate_lmdb_data(info_file_path, lmdb_data_root, reverse, num_workers=NUM_
     print('\nEnd date: %s' % time.asctime(time.localtime(end)))
     utils.print_elapsed_time(start)
 
-def save_data_for_job(job, data_root, binary_kp_map_root, gaussian_kp_class_vector_root, keypoint_class_vector_root, viewpoint_label_root, euclidean_dt_map_root, manhattan_dt_map_root, chessboard_dt_map_root, zero_keypoint_map_root):
+def save_data_for_job(job, lmdb_data_paths):
     job_key = get_job_key(job)
+
     image = job_to_image(job)
-    path = os.path.join(data_root, job_key + '.png')
+    path = os.path.join(lmdb_data_paths['data'], job_key + '.png')
     imsave(path, image)
 
     binary_map = job_to_binary_keypoint_map(job)
-    path = os.path.join(binary_kp_map_root, job_key + '.png')
+    path = os.path.join(lmdb_data_paths['binary_kp_map'], job_key + '.png')
     imsave(path, binary_map)
 
     gaussian_map = job_to_gaussian_keypoint_map(job)
-    path = os.path.join(gaussian_kp_class_vector_root, job_key + '.png')
+    path = os.path.join(lmdb_data_paths['gaussian_kp_class_vector'], job_key + '.png')
     imsave(path, gaussian_map)
 
     keypoint_class_vector = job_to_keypoint_class_vector(job)
-    path = os.path.join(keypoint_class_vector_root, job_key + '.npy')
+    path = os.path.join(lmdb_data_paths['keypoint_class_vector'], job_key + '.npy')
     np.save(path, keypoint_class_vector)
 
     viewpoint_label = job_to_viewpoint_label(job)
-    path = os.path.join(viewpoint_label_root, job_key + '.npy')
+    path = os.path.join(lmdb_data_paths['viewpoint_label'], job_key + '.npy')
     np.save(path, viewpoint_label)
 
     euclidean_dt_map = job_to_euclidean_dt_map(job)
-    path = os.path.join(euclidean_dt_map_root, job_key + '.npy')
+    path = os.path.join(lmdb_data_paths['euclidean_dt_map'], job_key + '.npy')
     np.save(path, euclidean_dt_map)
-
+    
     manhattan_dt_map = job_to_manhattan_dt_map(job)
-    path = os.path.join(manhattan_dt_map_root, job_key + '.npy')
+    path = os.path.join(lmdb_data_paths['manhattan_dt_map'], job_key + '.npy')
     np.save(path, manhattan_dt_map)
 
     chessboard_dt_map = job_to_chessboard_dt_map(job)
-    path = os.path.join(chessboard_dt_map_root, job_key + '.npy')
+    path = os.path.join(lmdb_data_paths['chessboard_dt_map'], job_key + '.npy')
     np.save(path, chessboard_dt_map)
 
-    zero_map = job_to_zero_keypoint_map(job)
-    path = os.path.join(zero_keypoint_map_root, job_key + '.npy')
-    np.save(path, zero_map)
+    zero_keypoint_map = job_to_zero_keypoint_map(job)
+    path = os.path.join(lmdb_data_paths['zero_keypoint_map'], job_key + '.npy')
+    np.save(path, zero_keypoint_map)
+
+    zero_keypoint_class_vector = job_to_zero_keypoint_class_vector(job)
+    path = os.path.join(lmdb_data_paths['zero_keypoint_class'], job_key + '.npy')
+    np.save(path, zero_keypoint_class_vector)
+
+    gaussian_attn_map = job_to_gaussian_attn_map(job)
+    path = os.path.join(lmdb_data_paths['gaussian_attn_map'], job_key + '.npy')
+    np.save(path, gaussian_attn_map)
+
+    for perturb_sigma in range(5, 50, 5):
+        perturbed_chessboard_dt_map = job_to_perturbed_chessboard_dt_map(job, perturb_sigma)
+        path_key = 'perturbed_%d_chessboard_dt_map' % perturb_sigma
+        path = os.path.join(lmdb_data_paths[path_key], job_key + '.png')
+        imsave(path, perturbed_chessboard_dt_map)
+
 
 def get_job_key(job):
     key_prefix, line, reverse = job
@@ -145,12 +175,15 @@ def get_job_key(job):
     m = re.match(utils.LINE_FORMAT, line)
     full_image_path = m.group(1)
     keypoint_class = m.group(8)
+    obj_class_id = m.group(9)
+    # obj_id = m.group(13)
+    obj_id = '0'
     # Get the file name without the extension
     full_image_name, _ = os.path.splitext(os.path.basename(full_image_path))
     if reverse:
-        return key_prefix + '_' + full_image_name + '_kp' + keypoint_class + '_r'
+        return key_prefix + '_' + full_image_name + '_obj' + obj_id + '_objc' + obj_class_id + '_kp' + keypoint_class + '_r'
     else:
-        return key_prefix + '_' + full_image_name + '_kp' + keypoint_class
+        return key_prefix + '_' + full_image_name + '_obj' + obj_id + '_objc' + obj_class_id + '_kp' + keypoint_class
 
 '''
 @args
@@ -171,7 +204,7 @@ def job_to_image(job):
     if full_image.ndim == 2:
         full_image = np.dstack((full_image, full_image, full_image))
     cropped_image = full_image[bbox[1]:bbox[3]+1, bbox[0]:bbox[2]+1, :]
-    scaled_image = imresize(cropped_image, (gv.g_images_resize_dim, gv.g_images_resize_dim))
+    scaled_image = imresize(cropped_image, (g_images_resize_dim, g_images_resize_dim))
     # Flip the image if needed
     if reverse:
         scaled_image = np.fliplr(scaled_image)
@@ -191,16 +224,19 @@ def job_to_binary_keypoint_map(job):
     bbox = np.array([int(x) for x in m.group(2,3,4,5)])
     keypoint_loc_full = np.array([float(x) for x in m.group(6,7)])
 
+    if keypoint_loc_full[0] == -1 and keypoint_loc_full[1] == -1:
+        return np.zeros((g_images_resize_dim, g_images_resize_dim), dtype=np.uint8)
+
     # Get bounding box dimensions
     bbox_size = np.array([bbox[2]-bbox[0]+1, bbox[3]-bbox[1]+1])
     # Get keypoint location inside the bounding box
     keypoint_loc_bb = keypoint_loc_full - bbox[:2]
-    keypoint_loc_scaled = np.floor(gv.g_images_resize_dim * keypoint_loc_bb / bbox_size).astype(np.uint8)
+    keypoint_loc_scaled = np.floor(g_images_resize_dim * keypoint_loc_bb / bbox_size).astype(np.uint8)
     # Push keypoint inside image (sometimes it ends up on edge due to float arithmetic)
-    keypoint_loc_scaled[0] = min(keypoint_loc_scaled[0], gv.g_images_resize_dim-1)
-    keypoint_loc_scaled[1] = min(keypoint_loc_scaled[1], gv.g_images_resize_dim-1)
+    keypoint_loc_scaled[0] = min(keypoint_loc_scaled[0], g_images_resize_dim-1)
+    keypoint_loc_scaled[1] = min(keypoint_loc_scaled[1], g_images_resize_dim-1)
     # Create keypoint location image
-    keypoint_image = np.zeros((gv.g_images_resize_dim, gv.g_images_resize_dim), dtype=np.uint8)
+    keypoint_image = np.zeros((g_images_resize_dim, g_images_resize_dim), dtype=np.uint8)
     keypoint_image[keypoint_loc_scaled[1], keypoint_loc_scaled[0]] = 1
     # Flip the image if needed
     if reverse:
@@ -247,9 +283,18 @@ def job_to_keypoint_class_vector(job):
 
     # Get one-hot vector encoding of keypoint class
     keypoint_class_vec = np.zeros(len(utils.KEYPOINT_CLASSES), dtype=np.uint8)
-    keypoint_class_vec[keypoint_class] = 1
+    if keypoint_class > 0:
+        keypoint_class_vec[keypoint_class] = 1
 
     return keypoint_class_vec
+
+'''
+@args
+    job ((str, str, bool)): A job tuple consisting of the key prefix, the line describing the instance, and
+        whether this example should be flipped
+'''
+def job_to_zero_keypoint_class_vector(job):
+    return np.zeros(len(utils.KEYPOINT_CLASSES), dtype=np.uint8)
 
 '''
 @args
@@ -281,7 +326,14 @@ def job_to_viewpoint_label(job):
     return viewpoint_label_vec
 
 def job_to_zero_keypoint_map(job):
-    return np.zeros((gv.g_images_resize_dim, gv.g_images_resize_dim), dtype=np.uint8)
+    return np.zeros((g_images_resize_dim, g_images_resize_dim), dtype=np.uint8)
+
+def job_to_gaussian_attn_map(job):
+    ret = np.zeros((13, 13))
+    ret[6, 6] = 1
+    ret = gaussian_filter(ret, 3)
+    ret /= np.sum(ret)
+    return ret
 
 def job_to_euclidean_dt_map(job):
     keypoint_image = job_to_binary_keypoint_map(job)
@@ -298,11 +350,34 @@ def job_to_manhattan_dt_map(job):
     return scipy.ndimage.distance_transform_cdt(keypoint_image_inv, metric='taxicab')
 
 def job_to_chessboard_dt_map(job):
+    key_prefix, line, reverse = job
+
+    # Extract info from the line
+    m = re.match(utils.LINE_FORMAT, line)
+    keypoint_loc_full = np.array([float(x) for x in m.group(6,7)])
+
+    if keypoint_loc_full[0] == -1 and keypoint_loc_full[1] == -1:
+        return np.zeros((g_images_resize_dim, g_images_resize_dim), dtype=np.uint8)
+
     keypoint_image = job_to_binary_keypoint_map(job)
     # Invert keypoint image
     keypoint_image_inv = 1 - keypoint_image/np.max(keypoint_image)
     # Apply distance transform
     return scipy.ndimage.distance_transform_cdt(keypoint_image_inv, metric='chessboard')
+
+def job_to_perturbed_chessboard_dt_map(job, sigma):
+    keypoint_image = job_to_binary_keypoint_map(job)
+    # Find keypoint coordinate
+    keypoint_loc = np.unravel_index(np.argmax(keypoint_image), keypoint_image.shape)
+    # Sample a perturbed coordinate
+    perturbed_keypoint_loc = np.array([-1, -1])
+    while not utils.insideBox(perturbed_keypoint_loc, [0, 0, g_images_resize_dim-1, g_images_resize_dim-1]):
+        perturbed_keypoint_loc = np.random.multivariate_normal(keypoint_loc, sigma ** 2 * np.eye(2)).astype(np.int)
+    # Create input to distance transform
+    perturbed_keypoint_image = np.full((g_images_resize_dim, g_images_resize_dim), 1)
+    perturbed_keypoint_image[perturbed_keypoint_loc[0], perturbed_keypoint_loc[1]] = 0
+    # Apply distance transform
+    return scipy.ndimage.distance_transform_cdt(perturbed_keypoint_image, metric='chessboard')
 
 def save_vector_data(args, vector_data_root):
     vector, key = args
@@ -326,23 +401,13 @@ def join_paths(base, dir):
 
 
 if __name__ == '__main__':
-    for mode in sys.argv[1:]:
-        random.seed(123)
-        if mode == 'syn':
-            info_file_path = os.path.join(gv.g_corresp_folder, 'syn_corresp_lmdb_info.csv')
-            generate_lmdb_data(info_file_path, gv.g_corresp_syn_lmdb_data_folder, True)
-        elif mode == 'real/train':
-            info_file_path = os.path.join(gv.g_corresp_folder, 'pascal_corresp_lmdb_info_train.csv')
-            generate_lmdb_data(info_file_path, gv.g_corresp_real_train_lmdb_data_folder, True)
-        elif mode == 'real/train_train':
-            info_file_path = os.path.join(gv.g_corresp_folder, 'pascal_corresp_lmdb_info_train_train.csv')
-            generate_lmdb_data(info_file_path, gv.g_corresp_real_train_train_lmdb_data_folder, True)
-        elif mode == 'real/train_val':
-            info_file_path = os.path.join(gv.g_corresp_folder, 'pascal_corresp_lmdb_info_train_val.csv')
-            generate_lmdb_data(info_file_path, gv.g_corresp_real_train_val_lmdb_data_folder, False)
-        elif mode == 'real/test':
-            info_file_path = os.path.join(gv.g_corresp_folder, 'pascal_corresp_lmdb_info_test.csv')
-            generate_lmdb_data(info_file_path, gv.g_corresp_real_test_lmdb_data_folder, False)
-        elif mode == 'real/test_small':
-            info_file_path = os.path.join(gv.g_corresp_folder, 'pascal_corresp_lmdb_info_test_small.csv')
-            generate_lmdb_data(info_file_path, gv.g_corresp_real_test_lmdb_data_folder + '_test', False)
+    # Create CSVs
+    utils.create_syn_image_keypoint_csv()
+    utils.create_pascal_image_keypoint_csvs()
+
+    # Generate synthetic data with data augmentation (horizontal flip)
+    generate_lmdb_data(g_syn_image_keypoint_info_file, g_corresp_syn_lmdb_data_folder, True)
+    # Create PASCAL training data with data augmentation (horizontal flip)
+    generate_lmdb_data(g_pascal_train_image_keypoint_info_file, g_corresp_pascal_train_lmdb_data_folder, True)
+    # Create PASCAL test data without data augmentation
+    generate_lmdb_data(g_pascal_test_image_keypoint_info_file, g_corresp_pascal_test_lmdb_data_folder, False)

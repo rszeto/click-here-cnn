@@ -7,18 +7,18 @@ from glob import glob
 from scipy.ndimage import imread
 import lmdb
 import random
-from scipy.misc import imresize
-import matplotlib.pyplot as plt
+# from scipy.misc import imresize
+# import matplotlib.pyplot as plt
 from warnings import warn
 import skimage
 import time
-import multiprocessing
-from pprint import pprint
-import h5py
+# import multiprocessing
+# from pprint import pprint
+# import h5py
 import scipy.ndimage
-import itertools
-from scipy.ndimage.filters import gaussian_filter
-from scipy.misc import imsave
+# import itertools
+# from scipy.ndimage.filters import gaussian_filter
+# from scipy.misc import imsave
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(BASE_DIR)
@@ -58,18 +58,14 @@ CLASSNAME_SYNSET_MAP = {}
 for synset, class_name in synset_name_pairs:
     CLASSNAME_SYNSET_MAP[class_name] = synset
 
-SYNSET_OLDCLASSIDX_MAP = {}
+SYNSET_CLASSIDX_MAP = {}
 for i in range(len(gv.g_shape_synset_name_pairs)):
     synset, _ = gv.g_shape_synset_name_pairs[i]
-    SYNSET_OLDCLASSIDX_MAP[synset] = i
+    SYNSET_CLASSIDX_MAP[synset] = i
 
 SYNSET_CLASSNAME_MAP = {}
 for synset, class_name in synset_name_pairs:
     SYNSET_CLASSNAME_MAP[synset] = class_name
-
-SYNSET_CLASSIDX_MAP = {}
-for i in range(len(synset_name_pairs)):
-    SYNSET_CLASSIDX_MAP[synset_name_pairs[i][0]] = i
 
 KEYPOINT_CLASSES = []
 for synset, class_name in synset_name_pairs:
@@ -262,10 +258,12 @@ def padImage(image, pad_size, pad_value):
     padded_tr = np.pad(image_tr, ((0, 0), (pad_size, pad_size), (pad_size, pad_size)), 'constant', constant_values=pad_value)
     return padded_tr.transpose(1, 2, 0)
 
-def createSynKeypointCsv():
-    if not os.path.exists(gv.g_corresp_folder):
-        os.mkdir(gv.g_corresp_folder)
-    infoFile = open(os.path.join(gv.g_corresp_folder, 'syn_corresp_lmdb_info.csv'), 'w')
+def create_syn_image_keypoint_csv():
+    # Make folder to store image-keypoint CSV file if needed
+    if not os.path.exists(gv.g_image_keypoint_info_folder):
+        os.mkdir(gv.g_image_keypoint_info_folder)
+
+    infoFile = open(gv.g_syn_image_keypoint_info_file, 'w')
     infoFile.write(INFO_FILE_HEADER)
     imgNamePattern = re.compile('(.*)_(.*)_a(.*)_e(.*)_t(.*)_d(.*).jpg')
     for synset in os.listdir(gv.g_syn_images_bkg_overlaid_folder):
@@ -276,8 +274,7 @@ def createSynKeypointCsv():
                 bbox = np.array([0, 0, image.shape[1]-1, image.shape[0]-1])
 
                 # Get class index from synset
-                # object_class = SYNSET_CLASSIDX_MAP[synset]
-                object_class = SYNSET_OLDCLASSIDX_MAP[synset]
+                object_class = SYNSET_CLASSIDX_MAP[synset]
                 class_name = SYNSET_CLASSNAME_MAP[synset]
 
                 # Extract azimuth, elevation, rotation from file name
@@ -305,7 +302,7 @@ def createSynKeypointCsv():
 
     infoFile.close()
 
-def createPascalKeypointCsv():
+def create_pascal_image_keypoint_csvs():
     # Generate train and test lists and store in file
     matlab_cmd = 'addpath(\'%s\'); getPascalTrainValImgs' % BASE_DIR
     os.system('matlab -nodisplay -r "try %s; catch; end; quit;"' % matlab_cmd)
@@ -318,16 +315,15 @@ def createPascalKeypointCsv():
     os.remove('trainImgIds.txt')
     os.remove('valImgIds.txt')
 
-    if not os.path.exists(gv.g_corresp_folder):
-        os.mkdir(gv.g_corresp_folder)
-    info_file_train = open(os.path.join(gv.g_corresp_folder, 'pascal_corresp_lmdb_info_train.csv'), 'w')
+    if not os.path.exists(gv.g_image_keypoint_info_folder):
+        os.mkdir(gv.g_image_keypoint_info_folder)
+    info_file_train = open(gv.g_pascal_train_image_keypoint_info_file, 'w')
     info_file_train.write(INFO_FILE_HEADER)
-    info_file_test = open(os.path.join(gv.g_corresp_folder, 'pascal_corresp_lmdb_info_test.csv'), 'w')
+    info_file_test = open(gv.g_pascal_test_image_keypoint_info_file, 'w')
     info_file_test.write(INFO_FILE_HEADER)
 
     for synset, class_name in synset_name_pairs:
-        # object_class = SYNSET_CLASSIDX_MAP[synset]
-        object_class = SYNSET_OLDCLASSIDX_MAP[synset]
+        object_class = SYNSET_CLASSIDX_MAP[synset]
         for dataset_source in DATASET_SOURCES:
             class_source_id = '%s_%s' % (class_name, dataset_source)
             for anno_file in sorted(os.listdir(os.path.join(ANNOTATIONS_ROOT, class_source_id))):
@@ -515,6 +511,35 @@ def create_tensor_lmdb(tensor_data_root, tensor_lmdb_root, keys):
     print('Finished creating %s' % tensor_lmdb_name)
     print_elapsed_time(start)
 
+# def create_chessboard_keypoint_map_mean():
+#     '''
+#     Find average keypoint map. Only sample 10k to avoid underflow errors and excessive time.
+#     :return:
+#     '''
+#     keypoint_map_lmdb_path = os.path.join(gv.g_z_corresp_syn_train_lmdb_folder, 'chessboard_dt_map_lmdb')
+#     keypoint_map_lmdb = lmdb.open(keypoint_map_lmdb_path, readonly=True)
+#     keypoint_maps = getFirstNLmdbVecs(keypoint_map_lmdb, 10000)
+#     keypoint_map_mean = np.mean(keypoint_maps.values(), axis=0)
+#     # Add batch and channel dimensions
+#     keypoint_map_mean = keypoint_map_mean[np.newaxis, np.newaxis, :, :]
+#     # Save as binaryproto file
+#     blob = caffe.io.array_to_blobproto(keypoint_map_mean)
+#     save_path = os.path.join(gv.g_corresp_model_root_folder, 'chessboard_dt_map_mean.binaryproto')
+#     with open(save_path, 'wb') as f:
+#         f.write(blob.SerializeToString())
+#
+# def running_mean(t):
+#     '''
+#     Get the average of the terms in t.
+#     :param t: A list of terms to be averaged
+#     :return: The average of the terms
+#     '''
+#     # n 1-indexes over t
+#     a_n = float(t[0])
+#     for n in range(2, len(t)+1):
+#         a_n = float(t[n-1])/n + (n-1) * a_n / n
+#     return a_n
+
 def batch_predict(model_deploy_file, model_params_file, batch_size, input_data, output_keys, mean_file=None, resize_dim=0):
     # Get LMDB keys from the first input type
     first_data = input_data[input_data.keys()[0]]
@@ -584,3 +609,13 @@ def batch_predict(model_deploy_file, model_params_file, batch_size, input_data, 
             for j in range(end_idx - start_idx):
                 outputs[i].append(np.array(np.squeeze(batch_outputs[j, :])))
     return outputs
+
+if __name__ == '__main__':
+    # for i in range(1000):
+    #     num_items = np.random.randint(1, 1000)
+    #     num_items = 5
+    #     list = np.random.randint(1000, size=num_items)
+    #     true_avg = np.mean(list)
+    #     running_avg = running_mean(list)
+    #     assert(true_avg - running_avg < 1e-8)
+    create_chessboard_keypoint_map_mean()
