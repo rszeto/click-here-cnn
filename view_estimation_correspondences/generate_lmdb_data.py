@@ -284,8 +284,7 @@ def job_to_keypoint_class_vector(job):
 
     # Get one-hot vector encoding of keypoint class
     keypoint_class_vec = np.zeros(len(utils.KEYPOINT_CLASSES), dtype=np.uint8)
-    if keypoint_class > 0:
-        keypoint_class_vec[keypoint_class] = 1
+    keypoint_class_vec[keypoint_class] = 1
 
     return keypoint_class_vec
 
