@@ -10,7 +10,7 @@ sys.path.append(os.path.dirname(BASE_DIR))
 import global_variables as gv
 import gen_lmdb_utils as utils
 
-def generate_lmdb_from_data(lmdb_data_root, lmdb_root, keys):
+def generate_lmdb_from_data(lmdb_data_root, lmdb_root, keys, is_pascal_test=False):
     # Print start time info
     start = time.time()
     print('Creating LMDBs from disk data')
@@ -21,9 +21,6 @@ def generate_lmdb_from_data(lmdb_data_root, lmdb_root, keys):
     # Define paths to data and final LMDBs
     image_data_root = os.path.join(lmdb_data_root, 'image')
     image_lmdb_root = os.path.join(lmdb_root, 'image_lmdb')
-
-    binary_keypoint_map_data_root = os.path.join(lmdb_data_root, 'keypoint_loc')
-    binary_keypoint_map_lmdb_root = os.path.join(lmdb_root, 'keypoint_loc_lmdb')
 
     gaussian_keypoint_map_data_root = os.path.join(lmdb_data_root, 'gaussian_keypoint_map')
     gaussian_keypoint_map_lmdb_root = os.path.join(lmdb_root, 'gaussian_keypoint_map_lmdb')
@@ -61,7 +58,6 @@ def generate_lmdb_from_data(lmdb_data_root, lmdb_root, keys):
     # Image
     processes.append(Process(target=utils.create_image_lmdb, args=(image_data_root, image_lmdb_root, keys)))
     # Keypoint maps
-    processes.append(Process(target=utils.create_image_lmdb, args=(binary_keypoint_map_data_root, binary_keypoint_map_lmdb_root, keys)))
     processes.append(Process(target=utils.create_image_lmdb, args=(gaussian_keypoint_map_data_root, gaussian_keypoint_map_lmdb_root, keys)))
     processes.append(Process(target=utils.create_tensor_lmdb, args=(euclidean_dt_map_data_root, euclidean_dt_map_lmdb_root, keys)))
     processes.append(Process(target=utils.create_tensor_lmdb, args=(manhattan_dt_map_data_root, manhattan_dt_map_lmdb_root, keys)))
@@ -70,14 +66,16 @@ def generate_lmdb_from_data(lmdb_data_root, lmdb_root, keys):
     processes.append(Process(target=utils.create_vector_lmdb, args=(keypoint_class_data_root, keypoint_class_lmdb_root, keys)))
     # Viewpoint labels
     processes.append(Process(target=utils.create_vector_lmdb, args=(viewpoint_label_data_root, viewpoint_label_lmdb_root, keys)))
-    # Zeroed-out keypoint map and class
-    processes.append(Process(target=utils.create_tensor_lmdb, args=(zero_keypoint_map_data_root, zero_keypoint_map_lmdb_root, keys)))
-    processes.append(Process(target=utils.create_vector_lmdb, args=(zero_keypoint_class_data_root, zero_keypoint_class_lmdb_root, keys)))
+    # Zeroed-out keypoint map and class (only evaluated at PASCAL test time)
+    if is_pascal_test:
+        processes.append(Process(target=utils.create_tensor_lmdb, args=(zero_keypoint_map_data_root, zero_keypoint_map_lmdb_root, keys)))
+        processes.append(Process(target=utils.create_vector_lmdb, args=(zero_keypoint_class_data_root, zero_keypoint_class_lmdb_root, keys)))
     # Gaussian skip-connection
     processes.append(Process(target=utils.create_tensor_lmdb, args=(gaussian_attn_map_data_root, gaussian_attn_map_lmdb_root, keys)))
-    # Perturbed keypoint maps
-    for i, sigma in enumerate(perturbation_sigmas):
-        processes.append(Process(target=utils.create_image_lmdb, args=(keypoint_map_perturbed_data_roots[i], keypoint_map_perturbed_lmdb_roots[i], keys)))
+    # Perturbed keypoint maps (only evaluated at PASCAL test time)
+    if is_pascal_test:
+        for i, sigma in enumerate(perturbation_sigmas):
+            processes.append(Process(target=utils.create_image_lmdb, args=(keypoint_map_perturbed_data_roots[i], keypoint_map_perturbed_lmdb_roots[i], keys)))
 
     for p in processes:
         p.start()
@@ -98,10 +96,12 @@ def generate_lmdb(data_root_path, lmdb_root_path):
 
 if __name__ == '__main__':
 
-    # Synthetic data
-    generate_lmdb(gv.g_corresp_syn_lmdb_data_folder, gv.g_corresp_syn_train_lmdb_folder)
+    # Synthetic training data
+    generate_lmdb(gv.g_corresp_syn_train_lmdb_data_folder, gv.g_corresp_syn_train_lmdb_folder)
+    # Synthetic validation data
+    generate_lmdb(gv.g_corresp_syn_test_lmdb_data_folder, gv.g_corresp_syn_test_lmdb_folder)
     # PASCAL training data
     generate_lmdb(gv.g_corresp_pascal_train_lmdb_data_folder, gv.g_corresp_pascal_train_lmdb_folder)
     # PASCAL test data
-    generate_lmdb(gv.g_corresp_pascal_test_lmdb_data_folder, gv.g_corresp_pascal_test_lmdb_folder)
+    generate_lmdb(gv.g_corresp_pascal_test_lmdb_data_folder, gv.g_corresp_pascal_test_lmdb_folder, is_test=True)
 

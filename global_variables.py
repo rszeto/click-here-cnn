@@ -113,20 +113,25 @@ g_caffe_prob_keys = ['fc-azimuth','fc-elevation','fc-tilt']
 g_test_batch_size = 256
 
 # Image-keypoint info
+# g_max_num_syn_test_images = 5000
+g_max_num_syn_test_images = 100
 g_image_keypoint_info_folder = os.path.join(g_data_folder, 'image_keypoint_info')
-g_syn_image_keypoint_info_file = os.path.join(g_image_keypoint_info_folder, 'syn_image_keypoint_info.csv')
+g_syn_train_image_keypoint_info_file = os.path.join(g_image_keypoint_info_folder, 'syn_train_image_keypoint_info.csv')
+g_syn_test_image_keypoint_info_file = os.path.join(g_image_keypoint_info_folder, 'syn_test_image_keypoint_info.csv')
 g_pascal_train_image_keypoint_info_file = os.path.join(g_image_keypoint_info_folder, 'pascal_train_image_keypoint_info.csv')
 g_pascal_test_image_keypoint_info_file = os.path.join(g_image_keypoint_info_folder, 'pascal_test_image_keypoint_info.csv')
 
 # LMDB data folders
 g_corresp_lmdb_data_folder = os.path.join(g_data_folder, 'lmdb_data')
-g_corresp_syn_lmdb_data_folder = os.path.join(g_corresp_lmdb_data_folder, 'syn')
+g_corresp_syn_train_lmdb_data_folder = os.path.join(g_corresp_lmdb_data_folder, 'syn', 'train')
+g_corresp_syn_test_lmdb_data_folder = os.path.join(g_corresp_lmdb_data_folder, 'syn', 'test')
 g_corresp_pascal_train_lmdb_data_folder = os.path.join(g_corresp_lmdb_data_folder, 'pascal', 'train')
 g_corresp_pascal_test_lmdb_data_folder = os.path.join(g_corresp_lmdb_data_folder, 'pascal', 'test')
 
 # LMDB folders on /z
 g_corresp_lmdb_folder = os.path.join(g_data_folder, 'lmdb')
-g_corresp_syn_train_lmdb_folder = os.path.join(g_corresp_lmdb_folder, 'syn')
+g_corresp_syn_train_lmdb_folder = os.path.join(g_corresp_lmdb_folder, 'syn', 'train')
+g_corresp_syn_test_lmdb_folder = os.path.join(g_corresp_lmdb_folder, 'syn', 'test')
 g_corresp_pascal_train_lmdb_folder = os.path.join(g_corresp_lmdb_folder, 'pascal', 'train')
 g_corresp_pascal_test_lmdb_folder = os.path.join(g_corresp_lmdb_folder, 'pascal', 'test')
 
