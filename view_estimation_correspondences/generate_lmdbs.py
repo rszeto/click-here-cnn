@@ -96,12 +96,12 @@ def generate_lmdb(data_root_path, lmdb_root_path, is_pascal_test=False):
 
 if __name__ == '__main__':
 
-    # # Synthetic training data
-    # generate_lmdb(gv.g_corresp_syn_train_lmdb_data_folder, gv.g_corresp_syn_train_lmdb_folder)
-    # # Synthetic validation data
-    # generate_lmdb(gv.g_corresp_syn_test_lmdb_data_folder, gv.g_corresp_syn_test_lmdb_folder)
-    # # PASCAL training data
-    # generate_lmdb(gv.g_corresp_pascal_train_lmdb_data_folder, gv.g_corresp_pascal_train_lmdb_folder)
+    # Synthetic training data
+    generate_lmdb(gv.g_corresp_syn_train_lmdb_data_folder, gv.g_corresp_syn_train_lmdb_folder)
+    # Synthetic validation data
+    generate_lmdb(gv.g_corresp_syn_test_lmdb_data_folder, gv.g_corresp_syn_test_lmdb_folder)
+    # PASCAL training data
+    generate_lmdb(gv.g_corresp_pascal_train_lmdb_data_folder, gv.g_corresp_pascal_train_lmdb_folder)
     # PASCAL test data
     generate_lmdb(gv.g_corresp_pascal_test_lmdb_data_folder, gv.g_corresp_pascal_test_lmdb_folder, is_pascal_test=True)
 
