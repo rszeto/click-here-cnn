@@ -135,17 +135,6 @@ g_corresp_syn_test_lmdb_folder = os.path.join(g_corresp_lmdb_folder, 'syn', 'tes
 g_corresp_pascal_train_lmdb_folder = os.path.join(g_corresp_lmdb_folder, 'pascal', 'train')
 g_corresp_pascal_test_lmdb_folder = os.path.join(g_corresp_lmdb_folder, 'pascal', 'test')
 
-# LMDB folders on /scratch
-g_scratch_corresp_lmdb_folder = '/scratch/home/szetor/Documents/DENSO_VCA/RenderForCNN/data/lmdb-new'
-g_scratch_corresp_syn_train_lmdb_folder = os.path.join(g_scratch_corresp_lmdb_folder, 'syn', 'train')
-g_scratch_corresp_syn_val_lmdb_folder = os.path.join(g_scratch_corresp_lmdb_folder, 'syn', 'val')
-g_scratch_corresp_real_train_lmdb_folder = os.path.join(g_scratch_corresp_lmdb_folder, 'real', 'train')
-g_scratch_corresp_real_train_train_lmdb_folder = os.path.join(g_scratch_corresp_lmdb_folder, 'real', 'train_train')
-g_scratch_corresp_real_train_val_lmdb_folder = os.path.join(g_scratch_corresp_lmdb_folder, 'real', 'train_val')
-g_scratch_corresp_real_test_lmdb_folder = os.path.join(g_scratch_corresp_lmdb_folder, 'real', 'test')
-g_scratch_corresp_real_test_perturbed_lmdb_folder = os.path.join(g_scratch_corresp_lmdb_folder, 'real', 'test_perturbed')
-g_scratch_corresp_real_test_det_lmdb_folder = os.path.join(g_scratch_corresp_lmdb_folder, 'real', 'test_det')
-
 # correspondence model location
 g_corresp_model_root_folder = os.path.join(g_render4cnn_root_folder, 'train')
 g_render4cnn_weights_path = os.path.join(g_corresp_model_root_folder, 'render4cnn_3dview.caffemodel')
