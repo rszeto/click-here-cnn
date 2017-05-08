@@ -87,21 +87,21 @@ def generate_lmdb_from_data(lmdb_data_root, lmdb_root, keys, is_pascal_test=Fals
     print
 
 
-def generate_lmdb(data_root_path, lmdb_root_path):
+def generate_lmdb(data_root_path, lmdb_root_path, is_pascal_test=False):
     keys_path = os.path.join(data_root_path, 'keys.txt')
     with open(keys_path, 'r') as f:
         keys = [line.strip() for line in f.readlines()]
-    generate_lmdb_from_data(data_root_path, lmdb_root_path, keys)
+    generate_lmdb_from_data(data_root_path, lmdb_root_path, keys, is_pascal_test=is_pascal_test)
 
 
 if __name__ == '__main__':
 
-    # Synthetic training data
-    generate_lmdb(gv.g_corresp_syn_train_lmdb_data_folder, gv.g_corresp_syn_train_lmdb_folder)
-    # Synthetic validation data
-    generate_lmdb(gv.g_corresp_syn_test_lmdb_data_folder, gv.g_corresp_syn_test_lmdb_folder)
-    # PASCAL training data
-    generate_lmdb(gv.g_corresp_pascal_train_lmdb_data_folder, gv.g_corresp_pascal_train_lmdb_folder)
+    # # Synthetic training data
+    # generate_lmdb(gv.g_corresp_syn_train_lmdb_data_folder, gv.g_corresp_syn_train_lmdb_folder)
+    # # Synthetic validation data
+    # generate_lmdb(gv.g_corresp_syn_test_lmdb_data_folder, gv.g_corresp_syn_test_lmdb_folder)
+    # # PASCAL training data
+    # generate_lmdb(gv.g_corresp_pascal_train_lmdb_data_folder, gv.g_corresp_pascal_train_lmdb_folder)
     # PASCAL test data
-    generate_lmdb(gv.g_corresp_pascal_test_lmdb_data_folder, gv.g_corresp_pascal_test_lmdb_folder, is_test=True)
+    generate_lmdb(gv.g_corresp_pascal_test_lmdb_data_folder, gv.g_corresp_pascal_test_lmdb_folder, is_pascal_test=True)
 
