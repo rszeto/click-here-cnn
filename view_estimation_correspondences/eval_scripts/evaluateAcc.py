@@ -2,12 +2,12 @@ import numpy as np
 import os
 import sys
 import scipy
-import skimage
+# import skimage
 import argparse
 import lmdb
 import cPickle as pickle
 import matplotlib.pyplot as plt
-import time
+import pdb
 
 # Import custom LMDB utilities
 eval_scripts_path = os.path.dirname(os.path.abspath(__file__))
@@ -25,9 +25,8 @@ import caffe
 from caffe.proto import caffe_pb2
 from google.protobuf import text_format
 
-# MAX_NUM_EXAMPLES = 500
+# MAX_NUM_EXAMPLES = 10
 MAX_NUM_EXAMPLES = 1e6
-BATCH_SIZE = 384
 
 ### END IMPORTS ###
 
@@ -84,15 +83,7 @@ def batch_predict(model_deploy_file, model_params_file, batch_size, input_data, 
     lmdb_keys = first_data.keys()
 
     # set imagenet_mean
-    if mean_file is None:
-        imagenet_mean = np.array([104, 117, 123])
-    else:
-        imagenet_mean = np.load(mean_file)
-        net_parameter = caffe_pb2.NetParameter()
-        text_format.Merge(open(model_deploy_file, 'r').read(), net_parameter)
-        ratio = resize_dim * 1.0 / imagenet_mean.shape[1]
-        imagenet_mean = scipy.ndimage.zoom(imagenet_mean, (1, ratio, ratio))
-
+    imagenet_mean = get_image_mean(mean_file, model_deploy_file, resize_dim)
     # INIT NETWORK - NEW CAFFE VERSION
     net = caffe.Net(model_deploy_file, model_params_file, caffe.TEST)
 
@@ -110,26 +101,7 @@ def batch_predict(model_deploy_file, model_params_file, batch_size, input_data, 
         print 'batch: %d/%d, idx: %d to %d' % (k+1, batch_num, start_idx, end_idx)
 
         # prepare batch input data
-        batch_data = {}
-        for data_layer_name in input_data.keys():
-            batch_data[data_layer_name] = []
-        # iterate through instances
-        for key in lmdb_keys[start_idx:end_idx]:
-            # iterate through input layers
-            for data_layer_name in input_data.keys():
-                data = input_data[data_layer_name][key]
-                # If data is a real image, subtract ImageNet mean
-                if data_layer_name == 'data':
-                    # Cast to float in order to allow negative values
-                    data = data.astype(np.float32) - imagenet_mean
-                batch_data[data_layer_name].append(data)
-
-        # If the batch size doesn't divide the data nicely, this is needed to fill up the last batch
-        for j in range(batch_size - (end_idx - start_idx)):
-            for data_layer_name in input_data.keys():
-                batch_data[data_layer_name].append(batch_data[data_layer_name][-1])
-
-        # forward pass
+        batch_data = prepare_batch_data(batch_size, end_idx, imagenet_mean, input_data, lmdb_keys, start_idx)# forward pass
         for data_layer_name, data in batch_data.iteritems():
             net.blobs[data_layer_name].data[...] = data
         out = net.forward()
@@ -140,6 +112,43 @@ def batch_predict(model_deploy_file, model_params_file, batch_size, input_data, 
             for j in range(end_idx - start_idx):
                 outputs[i].append(np.array(np.squeeze(batch_outputs[j, :])))
     return outputs
+
+
+def get_image_mean(mean_file, model_deploy_file, resize_dim):
+    if mean_file is None:
+        imagenet_mean = np.array([104, 117, 123])
+    else:
+        imagenet_mean = np.load(mean_file)
+        net_parameter = caffe_pb2.NetParameter()
+        text_format.Merge(open(model_deploy_file, 'r').read(), net_parameter)
+        ratio = resize_dim * 1.0 / imagenet_mean.shape[1]
+        imagenet_mean = scipy.ndimage.zoom(imagenet_mean, (1, ratio, ratio))
+
+    return imagenet_mean
+
+
+def prepare_batch_data(batch_size, end_idx, imagenet_mean, input_data, lmdb_keys, start_idx):
+    batch_data = {}
+    for data_layer_name in input_data.keys():
+        batch_data[data_layer_name] = []
+    # iterate through instances
+    for key in lmdb_keys[start_idx:end_idx]:
+        # iterate through input layers
+        for data_layer_name in input_data.keys():
+            data = input_data[data_layer_name][key]
+            # If data is a real image, subtract ImageNet mean
+            if data_layer_name == 'data':
+                # Cast to float in order to allow negative values
+                data = data.astype(np.float32) - imagenet_mean
+            batch_data[data_layer_name].append(data)
+
+    # If the batch size doesn't divide the data nicely, this is needed to fill up the last batch
+    for j in range(batch_size - (end_idx - start_idx)):
+        for data_layer_name in input_data.keys():
+            batch_data[data_layer_name].append(batch_data[data_layer_name][-1])
+
+    return batch_data
+
 
 '''
 Generate the prediction accuracy of the given model.
@@ -164,41 +173,16 @@ def get_model_acc(lmdb_tuples, model_proto, model_weights, test_root, output_key
         ("keypoint_class", "keypoint_class_lmdb", False)
     ]
     '''
-    input_data = {}
-    label_data = None
-    lmdb_keys = None
-    for lmdb_tuple in lmdb_tuples:
-        input_name, lmdb_name, is_image_data = lmdb_tuple
-        cur_lmdb = lmdb.open(os.path.join(test_root, lmdb_name), readonly=True)
-        if input_name == 'label':
-            label_data = utils.getFirstNLmdbVecs(cur_lmdb, MAX_NUM_EXAMPLES)
-        else:
-            if is_image_data:
-                input_data[input_name] = utils.getFirstNLmdbCaffeImgs(cur_lmdb, MAX_NUM_EXAMPLES)
-            else:
-                input_data[input_name] = utils.getFirstNLmdbVecs(cur_lmdb, MAX_NUM_EXAMPLES)
-                # Hack
-                if input_name == 'pool5_weight_map':
-                    for key, value in input_data[input_name].iteritems():
-                        input_data[input_name][key] = value[np.newaxis, :, :]
-
-            # Compare keys to make sure they're consistent across LMDBs
-            if lmdb_keys is None:
-                lmdb_keys = input_data[input_name].keys()
-            else:
-                assert(lmdb_keys == input_data[input_name].keys())
-
-    # Check label data was found and its keys match the input data
-    assert(label_data)
-    assert(lmdb_keys == label_data.keys())
+    input_data, label_data, lmdb_keys = prepare_input_data(lmdb_tuples, test_root)
 
     angle_names = ['azimuth', 'elevation', 'tilt']
     # output_keys = ['pred_azimuth', 'pred_elevation', 'pred_tilt']
     if not eval_from_cache:
         # Do forward pass to extract predictions for all classes
-        full_activations = batch_predict(model_proto, model_weights, min(MAX_NUM_EXAMPLES, BATCH_SIZE), input_data, output_keys, imagenet_mean_file, resize_dim=227)
+        full_activations = batch_predict(model_proto, model_weights, min(MAX_NUM_EXAMPLES, gv.g_test_batch_size), input_data, output_keys, imagenet_mean_file, resize_dim=227)
         # Cache predictions to file
         if activation_cache_file:
+            print('Caching activations')
             activation_dict = {}
             for i, angle_name in enumerate(angle_names):
                 activation_dict[angle_name] = {}
@@ -221,7 +205,7 @@ def get_model_acc(lmdb_tuples, model_proto, model_weights, test_root, output_key
     for i, key in enumerate(lmdb_keys):
         viewpoint_labels_as_mat[i, :] = label_data[key]
     # Convert keypoint class vectors to indexes for stratified evaluation
-    # keypoint_classes = [np.where(data_keypoint_class[lmdb_keys[k]])[0] for k in range(len(lmdb_keys))]
+    keypoint_classes = extract_keypoint_classes(test_root, MAX_NUM_EXAMPLES)
 
     # Extract the angle activations for the correct object class
     obj_classes = viewpoint_labels_as_mat[:, 0]
@@ -231,11 +215,56 @@ def get_model_acc(lmdb_tuples, model_proto, model_weights, test_root, output_key
     # Compute accuracy and median error per object class
     class_accs, class_med_errs = compute_metrics_by_obj_class(angle_dists, obj_classes)
     # Compute accuracy and median error per keypoint class
-    # keypoint_class_accs, keypoint_class_mederrs = compute_metrics_by_keypt_class(angle_dists, keypoint_classes)
+    keypoint_class_accs, keypoint_class_mederrs = compute_metrics_by_keypt_class(angle_dists, keypoint_classes)
 
     # return class_accs, class_med_errs, keypoint_class_accs, keypoint_class_mederrs
-    return class_accs, class_med_errs, None, None
+    return class_accs, class_med_errs, keypoint_class_accs, keypoint_class_mederrs
 
+
+def prepare_input_data(lmdb_tuples, test_root, max_num_examples=MAX_NUM_EXAMPLES):
+    input_data = {}
+    label_data = None
+    lmdb_keys = None
+    for lmdb_tuple in lmdb_tuples:
+        input_name, lmdb_name, is_image_data = lmdb_tuple
+        cur_lmdb = lmdb.open(os.path.join(test_root, lmdb_name), readonly=True, lock=False)
+        if input_name == 'label':
+            label_data = utils.getFirstNLmdbVecs(cur_lmdb, max_num_examples)
+        else:
+            if is_image_data:
+                input_data[input_name] = utils.getFirstNLmdbCaffeImgs(cur_lmdb, max_num_examples)
+            else:
+                input_data[input_name] = utils.getFirstNLmdbVecs(cur_lmdb, max_num_examples)
+                # Hack
+                if input_name == 'keypoint_map':
+                    for key, value in input_data[input_name].iteritems():
+                        input_data[input_name][key] = value[np.newaxis, :, :]
+                elif input_name == 'keypoint_class':
+                    for key, value in input_data[input_name].iteritems():
+                        input_data[input_name][key] = value[:, np.newaxis, np.newaxis]
+                elif input_name == 'attn':
+                    for key, value in input_data[input_name].iteritems():
+                        input_data[input_name][key] = value[np.newaxis, :, :]
+
+            # Compare keys to make sure they're consistent across LMDBs
+            if lmdb_keys is None:
+                lmdb_keys = input_data[input_name].keys()
+            else:
+                assert (lmdb_keys == input_data[input_name].keys())
+
+    # Check label data was found and its keys match the input data
+    assert (label_data)
+    assert (lmdb_keys == label_data.keys())
+    return input_data, label_data, lmdb_keys
+
+
+def extract_keypoint_classes(test_root, max_num_examples):
+    keypoint_class_lmdb = lmdb.open(os.path.join(test_root, 'keypoint_class_lmdb'), readonly=True, lock=False)
+    keypoint_class_data = utils.getFirstNLmdbVecs(keypoint_class_lmdb, max_num_examples)
+    ret = []
+    for lmdb_key, keypoint_class_vec in keypoint_class_data.iteritems():
+        ret.append(np.where(keypoint_class_vec)[0][0])
+    return ret
 
 def activations_to_preds(full_predictions, obj_classes):
     num_angles = len(full_predictions)
@@ -274,7 +303,7 @@ def compute_metrics_by_obj_class(angle_dists, obj_classes):
     class_accs = {}
     class_med_errs = {}
     for synset, class_name in utils.synset_name_pairs:
-        class_id = utils.SYNSET_OLDCLASSIDX_MAP[synset]
+        class_id = utils.SYNSET_CLASSIDX_MAP[synset]
         obj_class_indexes = np.where(obj_classes == class_id)[0]
         if len(obj_class_indexes) == 0:
             continue
@@ -306,7 +335,6 @@ if __name__ == '__main__':
     parser.add_argument('test_root', type=str, help='The root directory of the LMDBs for the test data. There should be LMDBs in folders called \'image_lmdb\', \'keypoint_class_lmdb\', \'keypoint_loc_lmdb\', and \'viewpoint_label_lmdb\' under this directory')
     parser.add_argument('output_keys', nargs=3, help='The names of the angle activation layers')
     parser.add_argument('lmdb_info', nargs="+", help='Information about each LMDB to use during evaluation. It must include the viewpoint label LMDB')
-    # parser.add_argument('mode', type=str, help='The type of evaluation to be done. Possibilities are "correspondences", "r4cnn"')
     parser.add_argument('--imagenet_mean_file', type=str, default=gv.g_image_mean_file, help='The path to the ImageNet mean .npy file')
     parser.add_argument('--output_file', type=str, default=None, help='Where to store the accuracy results. By default, it will not save')
     parser.add_argument('--prediction_cache_file', type=str, default=None, help='Where to cache the (verbose) angle predictions. By default, it will not save')
@@ -316,7 +344,7 @@ if __name__ == '__main__':
 
     assert(len(args.lmdb_info) % 3 == 0)
     lmdb_tuples = zip(args.lmdb_info[0::3], args.lmdb_info[1::3], [s == 'True' for s in args.lmdb_info[2::3]])
-    class_accs, class_med_errs, keypoint_class_accs, keypoint_class_mederrs = get_model_acc(lmdb_tuples, args.model_proto, args.model_weights, args.test_root, args.output_keys, imagenet_mean_file=gv.g_image_mean_file, activation_cache_file=args.prediction_cache_file, eval_from_cache=False)
+    class_accs, class_med_errs, keypoint_class_accs, keypoint_class_mederrs = get_model_acc(lmdb_tuples, args.model_proto, args.model_weights, args.test_root, args.output_keys, imagenet_mean_file=gv.g_image_mean_file, activation_cache_file=args.prediction_cache_file, eval_from_cache=args.eval_from_cache)
 
     # Write accuracy and median error results
     if args.output_file:
@@ -334,9 +362,11 @@ if __name__ == '__main__':
     f.write('Mean accuracy: %0.4f\n' % np.mean(class_accs.values()))
     f.write('Mean medErr: %0.4f\n' % np.mean(class_med_errs.values()))
     f.write('\n')
-    # for keypoint_class_name in sorted(keypoint_class_accs.keys()):
-    #     f.write('%s:\n' % keypoint_class_name)
-    #     f.write('\tAccuracy: %0.4f\n' % keypoint_class_accs[keypoint_class_name])
-    #     f.write('\tMedErr: %0.4f\n' % keypoint_class_mederrs[keypoint_class_name])
+    if keypoint_class_accs and keypoint_class_mederrs:
+        for keypoint_class_name in sorted(keypoint_class_accs.keys()):
+            f.write('%s:\n' % keypoint_class_name)
+            f.write('\tAccuracy: %0.4f\n' % keypoint_class_accs[keypoint_class_name])
+            f.write('\tMedErr: %0.4f\n' % keypoint_class_mederrs[keypoint_class_name])
     if args.output_file:
         f.close()
+        os.chmod(args.output_file, 0766)
