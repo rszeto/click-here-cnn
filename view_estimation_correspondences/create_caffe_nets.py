@@ -36,7 +36,7 @@ DEFAULT_BIAS_FILLER = dict(type='constant', value=0)
 DEFAULT_DROPOUT_RATIO = 0.5
 DEFAULT_ANGLE_NAMES = ['azimuth', 'elevation', 'tilt']
 DEFAULT_LOSS_WEIGHTS = [1, 1, 1]
-BATCH_SIZE = 192
+BATCH_SIZE = 64
 
 # Parameters for angle softmax+loss
 DEFAULT_SOFTMAX_VIEW_LOSS_PARAM_A = dict(bandwidth=15, sigma=5, pos_weight=1, neg_weight=0, period=360)
@@ -1220,9 +1220,9 @@ def main(model_name, train_eval_with_pascal, initial_weights_path, perturb_sigma
     # Verify the models
     if not pascal_test_only:
         z_train_model = create_model_fn(train_lmdb_paths, BATCH_SIZE)
-        verify_netspec(z_train_model, initial_weights_path)
+        # verify_netspec(z_train_model, initial_weights_path)
     z_test_model = create_model_fn(test_lmdb_paths, BATCH_SIZE)
-    verify_netspec(z_test_model, initial_weights_path)
+    # verify_netspec(z_test_model, initial_weights_path)
 
     # Get experiment folder names
     exp_folder_names = os.listdir(gv.g_experiments_root_folder)
@@ -1290,6 +1290,7 @@ def main(model_name, train_eval_with_pascal, initial_weights_path, perturb_sigma
     train_script_contents = train_script_contents.replace('[[INITIAL_WEIGHTS]]', initial_weights_path)
     train_script_contents = train_script_contents.replace('[[EXPERIMENT_FOLDER_NAME]]', cur_exp_folder_name)
     train_script_contents = train_script_contents.replace('[[EXPERIMENTS_ROOT]]', gv.g_experiments_root_folder)
+    train_script_contents = train_script_contents.replace('[[PBS_SCRIPT_DIR]]', gv.g_pbs_script_dir)
     # Save script
     with open(os.path.join(model_path, 'train.sh'), 'w') as f:
         f.write(train_script_contents)
@@ -1302,6 +1303,7 @@ def main(model_name, train_eval_with_pascal, initial_weights_path, perturb_sigma
     # Replace variables in script
     resume_script_contents = resume_script_contents.replace('[[EXPERIMENT_FOLDER_NAME]]', cur_exp_folder_name)
     resume_script_contents = resume_script_contents.replace('[[EXPERIMENTS_ROOT]]', gv.g_experiments_root_folder)
+    resume_script_contents = resume_script_contents.replace('[[PBS_SCRIPT_DIR]]', gv.g_pbs_script_dir)
     # Save script
     with open(os.path.join(model_path, 'resume.sh'), 'w') as f:
         f.write(resume_script_contents)

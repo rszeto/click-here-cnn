@@ -128,8 +128,9 @@ g_corresp_syn_test_lmdb_data_folder = os.path.join(g_corresp_lmdb_data_folder, '
 g_corresp_pascal_train_lmdb_data_folder = os.path.join(g_corresp_lmdb_data_folder, 'pascal', 'train')
 g_corresp_pascal_test_lmdb_data_folder = os.path.join(g_corresp_lmdb_data_folder, 'pascal', 'test')
 
-# LMDB folders on /z
-g_corresp_lmdb_folder = os.path.join(g_data_folder, 'lmdb')
+# LMDB folders
+# g_corresp_lmdb_folder = os.path.join(g_data_folder, 'lmdb')
+g_corresp_lmdb_folder = os.path.join('/media/hdd1/RenderForCNN-data', 'lmdb')
 g_corresp_syn_train_lmdb_folder = os.path.join(g_corresp_lmdb_folder, 'syn', 'train')
 g_corresp_syn_test_lmdb_folder = os.path.join(g_corresp_lmdb_folder, 'syn', 'test')
 g_corresp_pascal_train_lmdb_folder = os.path.join(g_corresp_lmdb_folder, 'pascal', 'train')
@@ -143,3 +144,6 @@ g_alexnet_weights_path = os.path.join(g_corresp_model_root_folder, 'bvlc_alexnet
 # Experiments folder
 g_experiments_root_folder = os.path.join(g_render4cnn_root_folder, 'experiments')
 g_experiments_snapshot_root_folder = os.path.join(g_experiments_root_folder, 'snapshots')
+
+# PBS scripts path
+g_pbs_script_dir = os.path.join(g_render4cnn_root_folder, 'pbs_scripts')
