@@ -143,7 +143,6 @@ g_alexnet_weights_path = os.path.join(g_corresp_model_root_folder, 'bvlc_alexnet
 
 # Experiments folder
 g_experiments_root_folder = os.path.join(g_render4cnn_root_folder, 'experiments')
-g_experiments_snapshot_root_folder = os.path.join(g_experiments_root_folder, 'snapshots')
 
 # PBS scripts path
 g_pbs_script_dir = os.path.join(g_render4cnn_root_folder, 'pbs_scripts')

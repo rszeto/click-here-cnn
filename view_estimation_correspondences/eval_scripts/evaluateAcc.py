@@ -8,6 +8,7 @@ import lmdb
 import cPickle as pickle
 import matplotlib.pyplot as plt
 import pdb
+import glob
 
 # Import custom LMDB utilities
 eval_scripts_path = os.path.dirname(os.path.abspath(__file__))
@@ -329,31 +330,42 @@ def compute_angle_dists(preds, viewpoint_labels_as_mat):
 
 
 if __name__ == '__main__':
+
     parser = argparse.ArgumentParser()
-    parser.add_argument('model_proto', type=str, help='The path to the deployment model prototxt file')
-    parser.add_argument('model_weights', type=str, help='The path to the model weights')
-    parser.add_argument('test_root', type=str, help='The root directory of the LMDBs for the test data. There should be LMDBs in folders called \'image_lmdb\', \'keypoint_class_lmdb\', \'keypoint_loc_lmdb\', and \'viewpoint_label_lmdb\' under this directory')
-    parser.add_argument('output_keys', nargs=3, help='The names of the angle activation layers')
-    parser.add_argument('lmdb_info', nargs="+", help='Information about each LMDB to use during evaluation. It must include the viewpoint label LMDB')
-    parser.add_argument('--imagenet_mean_file', type=str, default=gv.g_image_mean_file, help='The path to the ImageNet mean .npy file')
-    parser.add_argument('--output_file', type=str, default=None, help='Where to store the accuracy results. By default, it will not save')
-    parser.add_argument('--prediction_cache_file', type=str, default=None, help='Where to cache the (verbose) angle predictions. By default, it will not save')
-    parser.add_argument('--eval_from_cache', dest='eval_from_cache', action='store_true', help='True if evaluations should be made from the cache file')
-    parser.set_defaults(eval_from_cache=False)
+    parser.add_argument('exp_num', type=int, help='The experiment number')
+    parser.add_argument('iter_num', type=int, help='The iteration number of the snapshot')
+    parser.add_argument('--cache_preds', action='store_true', help='Whether to save the predictions to disk if they don\'t exist, or use the existing cache if they do')
     args = parser.parse_args()
 
-    assert(len(args.lmdb_info) % 3 == 0)
-    lmdb_tuples = zip(args.lmdb_info[0::3], args.lmdb_info[1::3], [s == 'True' for s in args.lmdb_info[2::3]])
-    class_accs, class_med_errs, keypoint_class_accs, keypoint_class_mederrs = get_model_acc(lmdb_tuples, args.model_proto, args.model_weights, args.test_root, args.output_keys, imagenet_mean_file=gv.g_image_mean_file, activation_cache_file=args.prediction_cache_file, eval_from_cache=args.eval_from_cache)
+    print('Evaluating weights for experiment %d, iteration %d' % (args.exp_num, args.iter_num))
+
+    # First, locate the experiment
+    exp_dir_list = glob.glob(os.path.join(gv.g_experiments_root_folder, '%06d_*' % args.exp_num))
+    if len(exp_dir_list) == 0:
+        print('Failed to find experiment %d' % args.exp_num)
+        exit()
+    exp_dir = exp_dir_list[0]
+
+    # Then, read the evaluation configuration
+    eval_config_lines = [line.strip() for line in open(os.path.join(exp_dir, 'evaluation', 'evalAcc_args.txt'), 'r').readlines()]
+    model_proto_path = eval_config_lines[0]
+    model_weights_path = eval_config_lines[1].replace('###', str(args.iter_num))
+    test_root = eval_config_lines[2]
+    output_keys = eval_config_lines[3:6]
+    lmdb_info = eval_config_lines[6:]
+    assert(len(lmdb_info) % 3 == 0)
+    lmdb_tuples = zip(lmdb_info[0::3], lmdb_info[1::3], [s == 'True' for s in lmdb_info[2::3]])
+
+    # Generate cache path if needed
+    cache_path = os.path.join(exp_dir, 'evaluation', 'cache_%d.pkl' % args.iter_num) if args.cache_preds else None
+    class_accs, class_med_errs, keypoint_class_accs, keypoint_class_mederrs = get_model_acc(lmdb_tuples, model_proto_path, model_weights_path, test_root, output_keys, activation_cache_file=cache_path)
 
     # Write accuracy and median error results
-    if args.output_file:
-        f = open(args.output_file, 'wb')
-    else:
-        f = sys.stdout
-    f.write('Results for test set at %s\n' % args.test_root)
-    f.write('Model prototxt file: %s\n' % args.model_proto)
-    f.write('Model weights: %s\n' % args.model_weights)
+    output_file = os.path.join(exp_dir, 'evaluation', 'acc_mederr_%d.txt' % args.iter_num)
+    f = open(output_file, 'wb')
+    f.write('Results for test set at %s\n' % test_root)
+    f.write('Model prototxt file: %s\n' % model_proto_path)
+    f.write('Model weights: %s\n' % model_weights_path)
     f.write('\n')
     for class_name in sorted(class_accs.keys()):
         f.write('%s:\n' % class_name)
@@ -367,6 +379,6 @@ if __name__ == '__main__':
             f.write('%s:\n' % keypoint_class_name)
             f.write('\tAccuracy: %0.4f\n' % keypoint_class_accs[keypoint_class_name])
             f.write('\tMedErr: %0.4f\n' % keypoint_class_mederrs[keypoint_class_name])
-    if args.output_file:
-        f.close()
-        os.chmod(args.output_file, 0766)
+    f.close()
+    # Expand read permissions
+    os.chmod(output_file, 0766)
