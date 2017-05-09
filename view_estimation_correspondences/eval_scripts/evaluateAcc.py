@@ -31,6 +31,10 @@ MAX_NUM_EXAMPLES = 1e6
 
 ### END IMPORTS ###
 
+def softmax(x):
+    numers = np.exp(x)
+    return numers/np.sum(numers)
+
 # Angle conversions
 def deg2rad(deg_angle):
     return deg_angle * np.pi / 180.0
@@ -162,7 +166,7 @@ Arguments:
 - imagenet_mean_file: The path to the ImageNet mean .npy file
 - output_file: Where to store the accuracy results. By default, it will not save
 '''
-def get_model_acc(lmdb_tuples, model_proto, model_weights, test_root, output_keys, imagenet_mean_file=gv.g_image_mean_file, activation_cache_file=None, eval_from_cache=False):
+def get_model_acc(lmdb_tuples, model_proto, model_weights, test_root, output_keys, imagenet_mean_file=gv.g_image_mean_file, score_cache_file=None, eval_from_cache=False):
     '''
     lmdb_tuples (arr): Array where each entry is a triple (input_name, lmdb_name, is_image_data), where
         - input_name is the input blob name
@@ -177,29 +181,6 @@ def get_model_acc(lmdb_tuples, model_proto, model_weights, test_root, output_key
     input_data, label_data, lmdb_keys = prepare_input_data(lmdb_tuples, test_root)
 
     angle_names = ['azimuth', 'elevation', 'tilt']
-    # output_keys = ['pred_azimuth', 'pred_elevation', 'pred_tilt']
-    if not eval_from_cache:
-        # Do forward pass to extract predictions for all classes
-        full_activations = batch_predict(model_proto, model_weights, min(MAX_NUM_EXAMPLES, gv.g_test_batch_size), input_data, output_keys, imagenet_mean_file, resize_dim=227)
-        # Cache predictions to file
-        if activation_cache_file:
-            print('Caching activations')
-            activation_dict = {}
-            for i, angle_name in enumerate(angle_names):
-                activation_dict[angle_name] = {}
-                for j, key in enumerate(lmdb_keys):
-                    activation_dict[angle_name][key] = full_activations[i][j]
-            pickle.dump(activation_dict, open(activation_cache_file, 'wb'))
-    else:
-        # Get activations from cache file
-        print('Importing activations from cache file')
-        activation_dict = pickle.load(open(activation_cache_file, 'rb'))
-        full_activations = []
-        for angle_name in angle_names:
-            arr = []
-            for key in lmdb_keys:
-                arr.append(activation_dict[angle_name][key])
-            full_activations.append(arr)
 
     # Convert labels to numpy array for comparing against activations (which are returned as a matrix)
     viewpoint_labels_as_mat = np.zeros((len(lmdb_keys), 4))
@@ -210,7 +191,30 @@ def get_model_acc(lmdb_tuples, model_proto, model_weights, test_root, output_key
 
     # Extract the angle activations for the correct object class
     obj_classes = viewpoint_labels_as_mat[:, 0]
-    preds = activations_to_preds(full_activations, obj_classes)
+
+    if not eval_from_cache:
+        # Do forward pass to extract predictions for all classes
+        full_activations = batch_predict(model_proto, model_weights, min(MAX_NUM_EXAMPLES, gv.g_test_batch_size), input_data, output_keys, imagenet_mean_file, resize_dim=227)
+        scores = activations_to_scores(full_activations, obj_classes)
+        # Cache scores to file
+        if score_cache_file:
+            print('Caching scores')
+            score_dict = {}
+            for i, angle_name in enumerate(angle_names):
+                score_dict[angle_name] = {}
+                for j, key in enumerate(lmdb_keys):
+                    score_dict[angle_name][key] = scores[j, i, :]
+            pickle.dump(score_dict, open(score_cache_file, 'wb'))
+    else:
+        # Get scores from cache file
+        print('Importing scores from cache file')
+        score_dict = pickle.load(open(score_cache_file, 'rb'))
+        scores = np.zeros((len(lmdb_keys), len(angle_names), 360))
+        for i, angle_name in enumerate(angle_names):
+            for j, key in enumerate(lmdb_keys):
+                scores[j, i, :] = score_dict[angle_name][key]
+
+    preds = np.argmax(scores, axis=2)
     # Compare predictions to ground truth labels
     angle_dists = compute_angle_dists(preds, viewpoint_labels_as_mat)
     # Compute accuracy and median error per object class
@@ -218,7 +222,6 @@ def get_model_acc(lmdb_tuples, model_proto, model_weights, test_root, output_key
     # Compute accuracy and median error per keypoint class
     keypoint_class_accs, keypoint_class_mederrs = compute_metrics_by_keypt_class(angle_dists, keypoint_classes)
 
-    # return class_accs, class_med_errs, keypoint_class_accs, keypoint_class_mederrs
     return class_accs, class_med_errs, keypoint_class_accs, keypoint_class_mederrs
 
 
@@ -267,20 +270,18 @@ def extract_keypoint_classes(test_root, max_num_examples):
         ret.append(np.where(keypoint_class_vec)[0][0])
     return ret
 
-def activations_to_preds(full_predictions, obj_classes):
+def activations_to_scores(full_predictions, obj_classes):
     num_angles = len(full_predictions)
-    preds = np.zeros((obj_classes.shape[0], num_angles))
+    scores = np.zeros((obj_classes.shape[0], num_angles, 360))
     for i in range(obj_classes.shape[0]):
         class_idx = int(obj_classes[i])
         # Go through each angle type
         for k in range(num_angles):
             all_class_probs = full_predictions[k][i]
             # Get predictions for given class
-            gt_class_probs = all_class_probs[class_idx * 360:(class_idx + 1) * 360]
-            pred = gt_class_probs.argmax() + class_idx * 360
-            preds[i, k] = pred
+            scores[i, k, :] = all_class_probs[class_idx * 360:(class_idx + 1) * 360]
 
-    return preds
+    return scores
 
 
 def compute_metrics_by_keypt_class(angle_dists, keypoint_classes):
@@ -358,7 +359,7 @@ if __name__ == '__main__':
 
     # Generate cache path if needed
     cache_path = os.path.join(exp_dir, 'evaluation', 'cache_%d.pkl' % args.iter_num) if args.cache_preds else None
-    class_accs, class_med_errs, keypoint_class_accs, keypoint_class_mederrs = get_model_acc(lmdb_tuples, model_proto_path, model_weights_path, test_root, output_keys, activation_cache_file=cache_path)
+    class_accs, class_med_errs, keypoint_class_accs, keypoint_class_mederrs = get_model_acc(lmdb_tuples, model_proto_path, model_weights_path, test_root, output_keys, score_cache_file=cache_path)
 
     # Write accuracy and median error results
     output_file = os.path.join(exp_dir, 'evaluation', 'acc_mederr_%d.txt' % args.iter_num)
