@@ -94,9 +94,7 @@ def plotLosses(train_files, test_files, savePath=None, showPlots=False):
     ax.set_xlabel('Number of iterations')
     ax.set_ylabel('Loss')
     ax.legend(loc='center left', bbox_to_anchor=(1, 0.5))
-    # ax.set_xlim([0, 90000])
     ax.set_ylim([0, 120])
-    # ax.set_ylim([50, 60])
 
     # Plot testing loss curves
     ax = plt.subplot(132)
@@ -111,9 +109,7 @@ def plotLosses(train_files, test_files, savePath=None, showPlots=False):
     ax.set_xlabel('Number of iterations')
     ax.set_ylabel('Loss')
     ax.legend(loc='center left', bbox_to_anchor=(1, 0.5))
-    # ax.set_xlim([0, 90000])
     ax.set_ylim([0, 120])
-    # ax.set_ylim([70, 80])
 
     # Plot testing acc curves
     ax = plt.subplot(133)
@@ -127,9 +123,7 @@ def plotLosses(train_files, test_files, savePath=None, showPlots=False):
     ax.set_title('Testing accuracy vs. iterations')
     ax.set_xlabel('Number of iterations')
     ax.set_ylabel('Sum of accuracies')
-    # ax.set_xlim([0, 90000])
     ax.set_ylim([0, 3])
-    # ax.set_ylim([2, 2.35])
 
     # Make global plot adjustments
     plt.suptitle(savePath if savePath else '')
