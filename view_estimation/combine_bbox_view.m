@@ -12,7 +12,7 @@
 %
 function combine_bbox_view(cls, det_bbox_mat_file, view_pred_file, output_folder, is3d)
 
-addpath(fullfile(mfilename('fullpath'), '../../'));
+addpath(fullfile(fileparts(mfilename('fullpath')), '../'));
 global_variables;
 
 if nargin < 5
@@ -25,6 +25,7 @@ try
     object = load(det_bbox_mat_file);
     boxes = object.boxes;
     views = importdata(view_pred_file);
+    views = views.data
     if is3d
         dets = combine_bbox_3dview(boxes, views);
         save(fullfile(output_folder, sprintf('%s_3dview.mat',cls)), 'dets');

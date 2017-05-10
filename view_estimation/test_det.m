@@ -1,6 +1,5 @@
 function test_det(prediction_folder, ARP, show_curve, write_result)
-% addpath(fullfile(mfilename('fullpath'), '../../'));
-addpath(fullfile(fileparts(mfilename('fullpath')), '../../'));
+addpath(fullfile(fileparts(mfilename('fullpath')), '../'));
 global_variables;
 
 if nargin < 2
@@ -71,7 +70,7 @@ if write_result
         end
         fprintf(fid, '\n');
         fprintf('Mean AVP-NV excluding bottles\n');
-        avp_mean = mean(aas(:,[1,2,3,5,6,7,8,9,10,11,12]),2);
+        avp_mean = mean(aas(:,:),2);
         vs = [4,8,16,24];
         for j = 1:4
             fprintf(fid, 'Mean AVP-%dV = %f\n', vs(j), mean(avp_mean(j)));

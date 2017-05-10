@@ -1,5 +1,4 @@
-import caffe
-from caffe.proto import caffe_pb2
+
 import lmdb
 import os
 import sys
@@ -17,6 +16,10 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(BASE_DIR)
 sys.path.append(os.path.dirname(BASE_DIR))
 from global_variables import *
+
+sys.path.append(g_pycaffe_path)
+import caffe
+from caffe.proto import caffe_pb2
 
 '''
 @brief:
