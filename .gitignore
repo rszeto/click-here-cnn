@@ -24,4 +24,6 @@ experiments
 caffe-r4cnn/
 pbs_scripts/
 train/old/
-/train/progress_web_server/.env/
+train/progress_web_server/.env/
+view_estimation_correspondences/eval_scripts/visualizations
+

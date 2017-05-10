@@ -7,18 +7,10 @@ from glob import glob
 from scipy.ndimage import imread
 import lmdb
 import random
-# from scipy.misc import imresize
-# import matplotlib.pyplot as plt
 from warnings import warn
 import skimage
 import time
-# import multiprocessing
-# from pprint import pprint
-# import h5py
 import scipy.ndimage
-# import itertools
-# from scipy.ndimage.filters import gaussian_filter
-# from scipy.misc import imsave
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(BASE_DIR)
@@ -40,18 +32,9 @@ DATASET_SOURCES = ['pascal', 'imagenet']
 LMDB_NAMES = ['image_lmdb', 'keypoint_class_lmdb', 'keypoint_loc_lmdb', 'viewpoint_label_lmdb']
 
 KEYPOINT_TYPES = {
-    # 'aeroplane': ['left_elevator', 'left_wing', 'noselanding', 'right_elevator', 'right_wing', 'rudder_lower', 'rudder_upper', 'tail'],
-    # 'bicycle': ['head_center', 'left_back_wheel', 'left_front_wheel', 'left_handle', 'left_pedal_center', 'right_back_wheel', 'right_front_wheel', 'right_handle', 'right_pedal_center', 'seat_back', 'seat_front'],
-    # 'boat': ['head', 'head_down', 'head_left', 'head_right', 'tail_left', 'tail_right', 'tail'],
-    # 'bottle': ['mouth', 'body', 'body_left', 'body_right', 'bottom', 'bottom_left', 'bottom_right'],
     'bus': ['body_back_left_lower', 'body_back_left_upper', 'body_back_right_lower', 'body_back_right_upper', 'body_front_left_upper', 'body_front_right_upper', 'body_front_left_lower', 'body_front_right_lower', 'left_back_wheel', 'left_front_wheel', 'right_back_wheel', 'right_front_wheel'],
     'car': ['left_front_wheel', 'left_back_wheel', 'right_front_wheel', 'right_back_wheel', 'upper_left_windshield', 'upper_right_windshield', 'upper_left_rearwindow', 'upper_right_rearwindow', 'left_front_light', 'right_front_light', 'left_back_trunk', 'right_back_trunk'],
-    # 'chair': ['back_upper_left', 'back_upper_right', 'seat_upper_left', 'seat_upper_right', 'seat_lower_left', 'seat_lower_right', 'leg_upper_left', 'leg_upper_right', 'leg_lower_left', 'leg_lower_right'],
-    # 'diningtable': ['leg_upper_left', 'leg_upper_right', 'leg_lower_left', 'leg_lower_right', 'top_upper_left', 'top_upper_right', 'top_lower_left', 'top_lower_right', 'top_up', 'top_down', 'top_left', 'top_right'],
     'motorbike': ['back_seat', 'front_seat', 'head_center', 'headlight_center', 'left_back_wheel', 'left_front_wheel', 'left_handle_center', 'right_back_wheel', 'right_front_wheel', 'right_handle_center'],
-    # 'sofa': ['front_bottom_left', 'front_bottom_right', 'seat_bottom_left', 'seat_bottom_right', 'left_bottom_back', 'right_bottom_back', 'top_left_corner', 'top_right_corner', 'seat_top_left', 'seat_top_right'],
-    # 'train': ['head_left_bottom', 'head_left_top', 'head_right_bottom', 'head_right_top', 'head_top', 'mid1_left_bottom', 'mid1_left_top', 'mid1_right_bottom', 'mid1_right_top', 'mid2_left_bottom', 'mid2_left_top', 'mid2_right_bottom', 'mid2_right_top', 'tail_left_bottom', 'tail_left_top', 'tail_right_bottom', 'tail_right_top'],
-    # 'tvmonitor': ['front_bottom_left', 'front_bottom_right', 'front_top_left', 'front_top_right', 'back_bottom_left', 'back_bottom_right', 'back_top_left', 'back_top_right']
 }
 
 CLASSNAME_SYNSET_MAP = {}
@@ -271,8 +254,8 @@ def create_syn_image_keypoint_csvs():
 
     image_name_pattern = re.compile('(.*)_(.*)_a(.*)_e(.*)_t(.*)_d(.*).jpg')
 
-    # Count how many images were processed; switch from test to train when count exceeds threshold
-    test_image_count = 0
+    # Count how many images were ; switch from test to train when count exceeds threshold
+    num_test_instances = 0
 
     for synset in os.listdir(gv.g_syn_images_bkg_overlaid_folder):
         for md5 in os.listdir(os.path.join(gv.g_syn_images_bkg_overlaid_folder, synset)):
@@ -308,13 +291,12 @@ def create_syn_image_keypoint_csvs():
                         keyptStr = keypointInfo2Str(image_path, bbox, keypoint_loc, keypoint_class, finalLabel)
 
                         # Write to either syn test or syn train file
-                        if test_image_count >= gv.g_max_num_syn_test_images:
+                        if num_test_instances >= gv.g_max_num_syn_test_instances:
                             syn_train_info_file.write(keyptStr)
                         else:
                             syn_test_info_file.write(keyptStr)
-
-                # Increment count
-                test_image_count += 1
+                        # Increment count
+                        num_test_instances += 1
 
     syn_train_info_file.close()
 
@@ -527,35 +509,6 @@ def create_tensor_lmdb(tensor_data_root, tensor_lmdb_root, keys):
     print('Finished creating %s' % tensor_lmdb_name)
     print_elapsed_time(start)
 
-# def create_chessboard_keypoint_map_mean():
-#     '''
-#     Find average keypoint map. Only sample 10k to avoid underflow errors and excessive time.
-#     :return:
-#     '''
-#     keypoint_map_lmdb_path = os.path.join(gv.g_z_corresp_syn_train_lmdb_folder, 'chessboard_dt_map_lmdb')
-#     keypoint_map_lmdb = lmdb.open(keypoint_map_lmdb_path, readonly=True)
-#     keypoint_maps = getFirstNLmdbVecs(keypoint_map_lmdb, 10000)
-#     keypoint_map_mean = np.mean(keypoint_maps.values(), axis=0)
-#     # Add batch and channel dimensions
-#     keypoint_map_mean = keypoint_map_mean[np.newaxis, np.newaxis, :, :]
-#     # Save as binaryproto file
-#     blob = caffe.io.array_to_blobproto(keypoint_map_mean)
-#     save_path = os.path.join(gv.g_corresp_model_root_folder, 'chessboard_dt_map_mean.binaryproto')
-#     with open(save_path, 'wb') as f:
-#         f.write(blob.SerializeToString())
-#
-# def running_mean(t):
-#     '''
-#     Get the average of the terms in t.
-#     :param t: A list of terms to be averaged
-#     :return: The average of the terms
-#     '''
-#     # n 1-indexes over t
-#     a_n = float(t[0])
-#     for n in range(2, len(t)+1):
-#         a_n = float(t[n-1])/n + (n-1) * a_n / n
-#     return a_n
-
 def batch_predict(model_deploy_file, model_params_file, batch_size, input_data, output_keys, mean_file=None, resize_dim=0):
     # Get LMDB keys from the first input type
     first_data = input_data[input_data.keys()[0]]
@@ -625,13 +578,3 @@ def batch_predict(model_deploy_file, model_params_file, batch_size, input_data, 
             for j in range(end_idx - start_idx):
                 outputs[i].append(np.array(np.squeeze(batch_outputs[j, :])))
     return outputs
-
-if __name__ == '__main__':
-    # for i in range(1000):
-    #     num_items = np.random.randint(1, 1000)
-    #     num_items = 5
-    #     list = np.random.randint(1000, size=num_items)
-    #     true_avg = np.mean(list)
-    #     running_avg = running_mean(list)
-    #     assert(true_avg - running_avg < 1e-8)
-    create_chessboard_keypoint_map_mean()
