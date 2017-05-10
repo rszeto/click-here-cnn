@@ -1,20 +1,15 @@
 import os
 import re
-import pdb
 import numpy as np
 import glob
 
 SCRIPT_DIR = os.path.abspath(os.path.dirname(__file__))
 EXP_ROOT = os.path.join(SCRIPT_DIR, '..', '..', 'experiments')
-EXCLUDE_EXPERIMENTS = [
-    '000001_02-03-2017_17:58:13',
-    '000002_02-03-2017_17:58:36',
-    '000003_02-03-2017_19:58:35'
-]
+EXCLUDE_EXPERIMENTS = []
 
 # Array of tuples specifying name for value, index in the values array, and whether to reverse-sort
-display_info = [('Mean accuracy', -2, True), ('Mean medErr', -1, False)]
-# display_info = [('Mean accuracy', 6, True), ('Mean medErr', 7, False)]
+# display_info = [('Mean accuracy', -2, True), ('Mean medErr', -1, False)]
+display_info = [('Mean accuracy', 6, True), ('Mean medErr', 7, False)]
 # Tuple specifying value to define overall performance with
 overall_perf_info = display_info[0]
 
@@ -84,13 +79,13 @@ def sort_exps_by_overall_perf(model_values_map, overall_perf_info):
     # Map from experiment to best value of performance metric
     exp_best_overall_perf_map = {}
     for model_key, values in model_values_map.iteritems():
+        # Skip if there aren't enough values (overall performance was probably not reported)
+        if len(values) < 7:
+            continue
         exp_num, iter_num = model_key
         best_exp_overall_perf = exp_best_overall_perf_map.get(exp_num, None)
         # Get performance metric of current experiment and iter num
-        try:
-            exp_overall_perf = values[index]
-        except:
-            pdb.set_trace()
+        exp_overall_perf = values[index]
         # Set as best performance if experiment wasn't seen
         if best_exp_overall_perf is None:
             exp_best_overall_perf_map[exp_num] = exp_overall_perf
@@ -129,13 +124,6 @@ def sort_exps_by_overall_perf(model_values_map, overall_perf_info):
 
 if __name__ == '__main__':
     model_values_map = get_model_values_map(only_include_experiments=['000027_02-20-2017_19:47:36'])
-
-    # # Find best performing architecture + iter combos
-    # for perf_info in display_info:
-    #     model_perf_tuples = sort_models_by_indiv_perf(model_values_map, perf_info)
-    #     print(perf_info[0])
-    #     for exp_num, iter_num, value in model_perf_tuples[:5]:
-    #         print('\t%f (experiment %d, iter %d)' % (value, exp_num, iter_num))
 
     # Find best performing model; each model uses the best weights    
     for perf_info in display_info:

@@ -87,7 +87,7 @@ def progress(exp_name):
         for perf_info in meta_evaluation.display_info:
             evaluation_contents += '<h2>Models sorted by: %s</h2>' % perf_info[0]
             overall_perf_tuples = meta_evaluation.sort_models_by_indiv_perf(model_values_map, perf_info)
-            for exp_num, iter_num, best_overall_perf in overall_perf_tuples[:5]:
+            for exp_num, iter_num, best_overall_perf in overall_perf_tuples[:10]:
                 evaluation_contents += '%f (iter %d)<br>' % (best_overall_perf, iter_num)
     
     return title_tag + css_tag  + image_tag + readme_tag + evaluation_contents
@@ -100,4 +100,4 @@ def plot(exp_name):
 def css():
     return static_file('style.css', root=SCRIPT_DIR)
 
-run(host='fstop.eecs.umich.edu', port=80, debug=True)
+run(host='fstop.eecs.umich.edu', port=8080, debug=True)
