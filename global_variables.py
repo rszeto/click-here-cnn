@@ -113,6 +113,7 @@ g_caffe_prob_keys = ['fc-azimuth','fc-elevation','fc-tilt']
 g_test_batch_size = 256
 
 # Image-keypoint info
+g_angle_names = ['azimuth', 'elevation', 'tilt']
 # g_max_num_syn_test_images = 5000
 g_max_num_syn_test_images = 100
 g_image_keypoint_info_folder = os.path.join(g_data_folder, 'image_keypoint_info')
@@ -143,6 +144,15 @@ g_alexnet_weights_path = os.path.join(g_corresp_model_root_folder, 'bvlc_alexnet
 
 # Experiments folder
 g_experiments_root_folder = os.path.join(g_render4cnn_root_folder, 'experiments')
+# Evaluation folder
+g_evaluation_scripts_folder = os.path.join(g_render4cnn_root_folder, 'view_estimation_correspondences', 'eval_scripts')
+# Folder for plots and visualizations
+g_visualizations_root_folder = os.path.join(g_evaluation_scripts_folder, 'visualizations')
+
+# Folder for qualitative comparison between two models
+g_qual_comp_folder = os.path.join(g_visualizations_root_folder, 'qualitative_comparison')
+# Folder for error distribution visualization
+g_error_dist_vis_folder = os.path.join(g_visualizations_root_folder, 'error_distribution')
 
 # PBS scripts path
 g_pbs_script_dir = os.path.join(g_render4cnn_root_folder, 'pbs_scripts')

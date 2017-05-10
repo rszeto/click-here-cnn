@@ -19,6 +19,9 @@ import gen_lmdb_utils as utils
 render4cnn_path = os.path.dirname(view_est_corresp_path)
 sys.path.append(render4cnn_path)
 import global_variables as gv
+# Import evaluation utils
+from eval_utils import compute_angle_dists
+from eval_utils import rad2deg
 
 # Import Caffe
 sys.path.append(gv.g_pycaffe_path)
@@ -31,43 +34,6 @@ MAX_NUM_EXAMPLES = 1e6
 
 ### END IMPORTS ###
 
-def softmax(x):
-    numers = np.exp(x)
-    return numers/np.sum(numers)
-
-# Angle conversions
-def deg2rad(deg_angle):
-    return deg_angle * np.pi / 180.0
-
-def rad2deg(rad_angle):
-    return rad_angle * 180.0 / np.pi
-
-# Produce the rotation matrix from the axis rotations
-def angle2dcm(xRot, yRot, zRot, deg_type='deg'):
-    if deg_type == 'deg':
-        xRot = deg2rad(xRot)
-        yRot = deg2rad(yRot)
-        zRot = deg2rad(zRot)
-
-    xMat = np.array([
-        [np.cos(xRot), np.sin(xRot), 0],
-        [-np.sin(xRot), np.cos(xRot), 0],
-        [0, 0, 1]
-    ])
-
-    yMat = np.array([
-        [np.cos(yRot), 0, -np.sin(yRot)],
-        [0, 1, 0],
-        [np.sin(yRot), 0, np.cos(yRot)]
-    ])
-
-    zMat = np.array([
-        [1, 0, 0],
-        [0, np.cos(zRot), np.sin(zRot)],
-        [0, -np.sin(zRot), np.cos(zRot)]
-    ])
-
-    return np.dot(zMat, np.dot(yMat, xMat))
 
 '''
 Forward propagate a set of images and obtain viewpoint predictions. Note that this returns predictions across all
@@ -180,8 +146,6 @@ def get_model_errors(model_proto, model_weights, test_root, output_keys, imagene
     '''
 
 
-    angle_names = ['azimuth', 'elevation', 'tilt']
-
     # Convert labels to numpy array for comparing against activations (which are returned as a matrix)
     viewpoint_labels_as_mat = np.array([label_data[key] for key in lmdb_keys])
     # Convert keypoint class vectors to indexes for stratified evaluation
@@ -198,7 +162,7 @@ def get_model_errors(model_proto, model_weights, test_root, output_keys, imagene
         if score_cache_file:
             print('Caching scores')
             score_dict = {}
-            for i, angle_name in enumerate(angle_names):
+            for i, angle_name in enumerate(gv.g_angle_names):
                 score_dict[angle_name] = {}
                 for j, key in enumerate(lmdb_keys):
                     score_dict[angle_name][key] = scores[j, i, :]
@@ -207,8 +171,8 @@ def get_model_errors(model_proto, model_weights, test_root, output_keys, imagene
         # Get scores from cache file
         print('Importing scores from cache file')
         score_dict = pickle.load(open(score_cache_file, 'rb'))
-        scores = np.zeros((len(lmdb_keys), len(angle_names), 360))
-        for i, angle_name in enumerate(angle_names):
+        scores = np.zeros((len(lmdb_keys), len(gv.g_angle_names), 360))
+        for i, angle_name in enumerate(gv.g_angle_names):
             for j, key in enumerate(lmdb_keys):
                 scores[j, i, :] = score_dict[angle_name][key]
 
@@ -216,10 +180,6 @@ def get_model_errors(model_proto, model_weights, test_root, output_keys, imagene
     preds = np.argmax(scores, axis=2)
     # Compare predictions to ground truth labels
     angle_dists = compute_angle_dists(preds, viewpoint_labels_as_mat)
-    # Compute accuracy and median error per object class
-    class_accs, class_med_errs = compute_metrics_by_obj_class(angle_dists, obj_classes)
-    # Compute accuracy and median error per keypoint class
-    keypoint_class_accs, keypoint_class_mederrs = compute_metrics_by_keypt_class(angle_dists, keypoint_classes)
 
     return angle_dists, obj_classes, keypoint_classes
 
@@ -357,17 +317,7 @@ def compute_metrics_by_obj_class(angle_dists, obj_classes):
 
     return class_accs, class_med_errs
 
-def compute_angle_dists(preds, viewpoint_labels_as_mat):
-    angle_dists = np.zeros(viewpoint_labels_as_mat.shape[0])
-    for i in range(viewpoint_labels_as_mat.shape[0]):
-        # Get rotation matrices from prediction and ground truth angles
-        predR = angle2dcm(preds[i, 0], preds[i, 1], preds[i, 2])
-        gtR = angle2dcm(viewpoint_labels_as_mat[i, 1], viewpoint_labels_as_mat[i, 2], viewpoint_labels_as_mat[i, 3])
-        # Get geodesic distance
-        angleDist = scipy.linalg.norm(scipy.linalg.logm(np.dot(predR.T, gtR)), 2) / np.sqrt(2)
-        angle_dists[i] = angleDist
 
-    return angle_dists
 
 
 if __name__ == '__main__':
