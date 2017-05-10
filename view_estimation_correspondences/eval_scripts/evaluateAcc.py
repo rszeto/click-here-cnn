@@ -166,7 +166,7 @@ Arguments:
 - imagenet_mean_file: The path to the ImageNet mean .npy file
 - output_file: Where to store the accuracy results. By default, it will not save
 '''
-def get_model_errors(model_proto, model_weights, test_root, output_keys, imagenet_mean_file=gv.g_image_mean_file, score_cache_file=None, eval_from_cache=True):
+def get_model_errors(model_proto, model_weights, test_root, output_keys, imagenet_mean_file=gv.g_image_mean_file, score_cache_file=None, eval_from_cache=False):
     '''
     lmdb_tuples (arr): Array where each entry is a triple (input_name, lmdb_name, is_image_data), where
         - input_name is the input blob name
