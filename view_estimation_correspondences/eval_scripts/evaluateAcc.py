@@ -166,7 +166,7 @@ Arguments:
 - imagenet_mean_file: The path to the ImageNet mean .npy file
 - output_file: Where to store the accuracy results. By default, it will not save
 '''
-def get_model_acc(lmdb_tuples, model_proto, model_weights, test_root, output_keys, imagenet_mean_file=gv.g_image_mean_file, score_cache_file=None, eval_from_cache=False):
+def get_model_errors(model_proto, model_weights, test_root, output_keys, imagenet_mean_file=gv.g_image_mean_file, score_cache_file=None, eval_from_cache=True):
     '''
     lmdb_tuples (arr): Array where each entry is a triple (input_name, lmdb_name, is_image_data), where
         - input_name is the input blob name
@@ -178,14 +178,12 @@ def get_model_acc(lmdb_tuples, model_proto, model_weights, test_root, output_key
         ("keypoint_class", "keypoint_class_lmdb", False)
     ]
     '''
-    input_data, label_data, lmdb_keys = prepare_input_data(lmdb_tuples, test_root)
+
 
     angle_names = ['azimuth', 'elevation', 'tilt']
 
     # Convert labels to numpy array for comparing against activations (which are returned as a matrix)
-    viewpoint_labels_as_mat = np.zeros((len(lmdb_keys), 4))
-    for i, key in enumerate(lmdb_keys):
-        viewpoint_labels_as_mat[i, :] = label_data[key]
+    viewpoint_labels_as_mat = np.array([label_data[key] for key in lmdb_keys])
     # Convert keypoint class vectors to indexes for stratified evaluation
     keypoint_classes = extract_keypoint_classes(test_root, MAX_NUM_EXAMPLES)
 
@@ -214,6 +212,7 @@ def get_model_acc(lmdb_tuples, model_proto, model_weights, test_root, output_key
             for j, key in enumerate(lmdb_keys):
                 scores[j, i, :] = score_dict[angle_name][key]
 
+    # Get predictions by taking the highest-scoring angle per rotation axis
     preds = np.argmax(scores, axis=2)
     # Compare predictions to ground truth labels
     angle_dists = compute_angle_dists(preds, viewpoint_labels_as_mat)
@@ -222,10 +221,10 @@ def get_model_acc(lmdb_tuples, model_proto, model_weights, test_root, output_key
     # Compute accuracy and median error per keypoint class
     keypoint_class_accs, keypoint_class_mederrs = compute_metrics_by_keypt_class(angle_dists, keypoint_classes)
 
-    return class_accs, class_med_errs, keypoint_class_accs, keypoint_class_mederrs
+    return angle_dists, obj_classes, keypoint_classes
 
 
-def prepare_input_data(lmdb_tuples, test_root, max_num_examples=MAX_NUM_EXAMPLES):
+def prepare_data_and_labels(lmdb_tuples, test_root, max_num_examples=MAX_NUM_EXAMPLES):
     input_data = {}
     label_data = None
     lmdb_keys = None
@@ -283,37 +282,78 @@ def activations_to_scores(full_predictions, obj_classes):
 
     return scores
 
+def compute_acc_by_keypoint_class(angle_dists, keypoint_classes, cur_keypoint_class, threshold):
+    # Get rows of current keypoint class
+    keypoint_class_indexes = [k for k in range(len(keypoint_classes)) if keypoint_classes[k] == cur_keypoint_class]
+    if len(keypoint_class_indexes) == 0:
+        print('Found no examples for keypoint class %d' % cur_keypoint_class)
+        return np.nan, np.nan
+    # Compute accuracy and standard error of the mean over accuracy of the current class
+    angle_dists_keypoint_class = angle_dists[keypoint_class_indexes]
+    acc = np.sum(angle_dists_keypoint_class < threshold) / float(len(keypoint_class_indexes))
+    sem = scipy.stats.sem(angle_dists_keypoint_class < threshold)
+    return acc, sem
+
+def compute_mederr_by_keypoint_class(angle_dists, keypoint_classes, cur_keypoint_class):
+    # Get rows of current keypoint class
+    keypoint_class_indexes = [k for k in range(len(keypoint_classes)) if keypoint_classes[k] == cur_keypoint_class]
+    if len(keypoint_class_indexes) == 0:
+        print('Found no examples for keypoint class %d' % cur_keypoint_class)
+        return np.nan, np.nan
+    # Compute median error and standard error of the mean over angle distances of the current class
+    angle_dists_keypoint_class = angle_dists[keypoint_class_indexes]
+    mederr = rad2deg(np.median(angle_dists_keypoint_class))
+    sem = rad2deg(scipy.stats.sem(angle_dists_keypoint_class))
+    return mederr, sem
+
+def compute_acc_by_object_class(angle_dists, object_classes, cur_object_class, threshold):
+    # Get rows of current object class
+    object_class_indexes = [k for k in range(len(object_classes)) if object_classes[k] == cur_object_class]
+    if len(object_class_indexes) == 0:
+        print('Found no examples for object class %d' % cur_object_class)
+        return np.nan, np.nan
+    # Compute accuracy and standard error of the mean over accuracy of the current class
+    angle_dists_object_class = angle_dists[object_class_indexes]
+    acc = np.sum(angle_dists_object_class < threshold) / float(len(object_class_indexes))
+    sem = scipy.stats.sem(angle_dists_object_class < threshold)
+    return acc, sem
+
+def compute_mederr_by_object_class(angle_dists, object_classes, cur_object_class):
+    # Get rows of current object class
+    object_class_indexes = [k for k in range(len(object_classes)) if object_classes[k] == cur_object_class]
+    if len(object_class_indexes) == 0:
+        print('Found no examples for object class %d' % cur_object_class)
+        return np.nan, np.nan
+    # Compute median error and standard error of the mean over angle distances of the current class
+    angle_dists_object_class = angle_dists[object_class_indexes]
+    mederr = rad2deg(np.median(angle_dists_object_class))
+    sem = rad2deg(scipy.stats.sem(angle_dists_object_class))
+    return mederr, sem
 
 def compute_metrics_by_keypt_class(angle_dists, keypoint_classes):
     keypoint_class_accs = {}
     keypoint_class_mederrs = {}
     for i, keypoint_class_name in enumerate(utils.KEYPOINT_CLASSES):
-        keypoint_class_indexes = [k for k in range(len(keypoint_classes)) if keypoint_classes[k] == i]
-        if len(keypoint_class_indexes) == 0:
-            print('Found no examples with keypoint %s, skipping' % keypoint_class_name)
-            continue
-        angle_dists_cur_keypoint_class = angle_dists[keypoint_class_indexes]
-        keypoint_class_acc = np.sum(angle_dists_cur_keypoint_class < np.pi / 6) / float(len(keypoint_class_indexes))
-        keypoint_class_mederr = rad2deg(np.median(angle_dists_cur_keypoint_class))
-        keypoint_class_accs[keypoint_class_name] = keypoint_class_acc
-        keypoint_class_mederrs[keypoint_class_name] = keypoint_class_mederr
+        acc, acc_sem = compute_acc_by_keypoint_class(angle_dists, keypoint_classes, i, np.pi/6)
+        if not np.isnan(acc):
+            keypoint_class_accs[keypoint_class_name] = acc
+        mederr, mederr_sem = compute_mederr_by_keypoint_class(angle_dists, keypoint_classes, i)
+        if not np.isnan(mederr):
+            keypoint_class_mederrs[keypoint_class_name] = mederr
 
     return keypoint_class_accs, keypoint_class_mederrs
-
 
 def compute_metrics_by_obj_class(angle_dists, obj_classes):
     class_accs = {}
     class_med_errs = {}
     for synset, class_name in utils.synset_name_pairs:
         class_id = utils.SYNSET_CLASSIDX_MAP[synset]
-        obj_class_indexes = np.where(obj_classes == class_id)[0]
-        if len(obj_class_indexes) == 0:
-            continue
-        angle_distsCurClass = angle_dists[obj_class_indexes]
-        class_acc = np.sum(angle_distsCurClass < np.pi / 6) / float(len(obj_class_indexes))
-        class_med_err = rad2deg(np.median(angle_distsCurClass))
-        class_accs[class_name] = class_acc
-        class_med_errs[class_name] = class_med_err
+        acc, acc_sem = compute_acc_by_object_class(angle_dists, obj_classes, class_id, np.pi/6)
+        if not np.isnan(acc):
+            class_accs[class_name] = acc
+        mederr, mederr_sem = compute_mederr_by_object_class(angle_dists, obj_classes, class_id)
+        if not np.isnan(mederr):
+            class_med_errs[class_name] = mederr
 
     return class_accs, class_med_errs
 
@@ -359,7 +399,14 @@ if __name__ == '__main__':
 
     # Generate cache path if needed
     cache_path = os.path.join(exp_dir, 'evaluation', 'cache_%d.pkl' % args.iter_num) if args.cache_preds else None
-    class_accs, class_med_errs, keypoint_class_accs, keypoint_class_mederrs = get_model_acc(lmdb_tuples, model_proto_path, model_weights_path, test_root, output_keys, score_cache_file=cache_path)
+
+    # Compute errors
+    input_data, label_data, lmdb_keys = prepare_data_and_labels(lmdb_tuples, test_root)
+    angle_dists, obj_classes, keypoint_classes = get_model_errors(model_proto_path, model_weights_path, test_root, output_keys, score_cache_file=cache_path)
+    # Compute accuracy and median error per object class
+    class_accs, class_med_errs = compute_metrics_by_obj_class(angle_dists, obj_classes)
+    # Compute accuracy and median error per keypoint class
+    keypoint_class_accs, keypoint_class_mederrs = compute_metrics_by_keypt_class(angle_dists, keypoint_classes)
 
     # Write accuracy and median error results
     output_file = os.path.join(exp_dir, 'evaluation', 'acc_mederr_%d.txt' % args.iter_num)
