@@ -413,20 +413,40 @@ if __name__ == '__main__':
     f = open(output_file, 'wb')
     f.write('Results for test set at %s\n' % test_root)
     f.write('Model prototxt file: %s\n' % model_proto_path)
-    f.write('Model weights: %s\n' % model_weights_path)
-    f.write('\n')
-    for class_name in sorted(class_accs.keys()):
-        f.write('%s:\n' % class_name)
-        f.write('\tAccuracy: %0.4f\n' % class_accs[class_name])
-        f.write('\tMedErr: %0.4f\n' % class_med_errs[class_name])
-    f.write('Mean accuracy: %0.4f\n' % np.mean(class_accs.values()))
-    f.write('Mean medErr: %0.4f\n' % np.mean(class_med_errs.values()))
-    f.write('\n')
-    if keypoint_class_accs and keypoint_class_mederrs:
-        for keypoint_class_name in sorted(keypoint_class_accs.keys()):
+    f.write('Model weights: %s\n\n' % model_weights_path)
+
+    ### Write object-wise info ###
+    # Keep track of running totals
+    running_acc = running_acc_sem = running_mederr = running_mederr_sem = num_obj_classes = 0.0
+    for synset, class_name in utils.synset_name_pairs:
+        class_id = utils.SYNSET_CLASSIDX_MAP[synset]
+        acc, acc_sem = compute_acc_by_object_class(angle_dists, obj_classes, class_id, np.pi/6)
+        mederr, mederr_sem = compute_mederr_by_object_class(angle_dists, obj_classes, class_id)
+        if not np.isnan(acc) and not np.isnan(mederr):
+            # Write info
+            f.write('%s:\n' % class_name)
+            f.write('\tAccuracy: %0.4f +/- %0.4f\n' % (acc, acc_sem))
+            f.write('\tMedErr: %0.4f +/- %0.4f\n' % (mederr, mederr_sem))
+            # Update running totals
+            running_acc += acc
+            running_acc_sem += acc_sem
+            running_mederr += mederr
+            running_mederr_sem += mederr_sem
+            num_obj_classes += 1
+    # Write summary
+    f.write('Mean accuracy: %0.4f +/- %0.4f\n' % (running_acc/num_obj_classes, running_acc_sem/num_obj_classes))
+    f.write('Mean medErr: %0.4f +/- %0.4f\n\n' % (running_mederr/num_obj_classes, running_mederr_sem/num_obj_classes))
+
+    ### Write object-wise info ###
+    for i, keypoint_class_name in enumerate(utils.KEYPOINT_CLASSES):
+        acc, acc_sem = compute_acc_by_keypoint_class(angle_dists, keypoint_classes, i, np.pi/6)
+        mederr, mederr_sem = compute_mederr_by_keypoint_class(angle_dists, keypoint_classes, i)
+        if not np.isnan(acc) and not np.isnan(mederr):
+            # Write info
             f.write('%s:\n' % keypoint_class_name)
-            f.write('\tAccuracy: %0.4f\n' % keypoint_class_accs[keypoint_class_name])
-            f.write('\tMedErr: %0.4f\n' % keypoint_class_mederrs[keypoint_class_name])
+            f.write('\tAccuracy: %0.4f +/- %0.4f\n' % (acc, acc_sem))
+            f.write('\tMedErr: %0.4f +/- %0.4f\n' % (mederr, mederr_sem))
+
+    # Close and expand read file permissions
     f.close()
-    # Expand read permissions
     os.chmod(output_file, 0766)
