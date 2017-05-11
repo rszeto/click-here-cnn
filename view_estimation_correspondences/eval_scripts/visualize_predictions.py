@@ -32,7 +32,7 @@ def getCorrespLmdbData(lmdbs_root, N):
     viewpoint_label_dict = utils.getFirstNLmdbVecs(viewpoint_label_lmdb, N)
     return images_dict.keys(), images_dict, keypoint_loc_dict, keypoint_class_dict, viewpoint_label_dict
 
-def visualize_predictions(lmdbs_root, N, activation_cache_files, labels, output_dir=gv.g_qual_comp_folder, reorder_by_perf=False):
+def visualize_predictions(N, activation_cache_files, labels, lmdbs_root=gv.g_corresp_pascal_test_lmdb_folder, output_dir=gv.g_qual_comp_folder, reorder_by_perf=False):
     keys, images_dict, keypoint_loc_dict, keypoint_class_dict, viewpoint_label_dict = getCorrespLmdbData(lmdbs_root, N)
     activation_dicts = [pickle.load(open(f, 'rb')) for f in activation_cache_files]
 
@@ -123,10 +123,10 @@ def visualize_predictions(lmdbs_root, N, activation_cache_files, labels, output_
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('lmdbs_root', type=str, help='The root path of the correspondence LMDBs')
     parser.add_argument('num_examples', type=int, help='The number of examples to visualize')
     parser.add_argument('activation_cache_files_labels', type=str, nargs='*', help='Pairs of cached activation files and labels.')
     parser.add_argument('--reorder_by_perf', action='store_true', help='Whether to reorder the saved images by relative performance.')
+    parser.add_argument('--lmdbs_root', type=str, help='Root of the keypoint LMDBs')
 
     args = parser.parse_args()
     # Separate the cache files and labels
@@ -135,4 +135,7 @@ if __name__ == '__main__':
     assert(len(activation_cache_files) > 0)
     assert(len(labels) > 0)
 
-    visualize_predictions(args.lmdbs_root, args.num_examples, activation_cache_files, labels, reorder_by_perf=args.reorder_by_perf)
+    if args.lmdbs_root:
+        visualize_predictions(args.num_examples, activation_cache_files, labels, lmdbs_root=args.lmdbs_root, reorder_by_perf=args.reorder_by_perf)
+    else:
+        visualize_predictions(args.num_examples, activation_cache_files, labels, reorder_by_perf=args.reorder_by_perf)

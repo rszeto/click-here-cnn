@@ -1,13 +1,9 @@
 # TODOS
 
 * Delete original ShapeNet unzip script
-* Delete global_variables.py script from repo
 * Update training curve plot code
 * Add instructions for generating and training models
-* Add experiments that can be evaluated immediately after generating PASCAL test data
-* Remove pbs_script path from global variables
 * Add note to install Caffe first
-* Add evalAcc_args.txt to .gitignore
 * Add caffemodels
 * Test and document visualization code
 
@@ -100,9 +96,40 @@ These are the models whose results are included in CH-CNN paper.
 	python init_demo_experiments.py
 	```
 
-2. Run evaluation
+2. Run evaluation on demo models (and cache scores to generate visualizations)
 
 	```
 	cd view_estimation_correspondences/eval_scripts
-	python evaluateAcc.py 67 6000 --demo
+	python evaluateAcc.py 67 6000 --demo --cache_preds
+	python evaluateAcc.py 70 2000 --demo --cache_preds
 	```
+
+	Results are stored in the `evaluation` folder under each experiment's folder.
+
+
+# Generating visualizations
+
+	```
+	# Assumes you ran above evaluation.
+	# $PROJ_ROOT is the location of the root of this project.
+	cd view_estimation_correspondences/eval_scripts
+	python visualize_predictions.py 6932 \
+		$PROJ_ROOT/demo_experiments/000067/evaluation/cache_6000.pkl R4CNN \
+		$PROJ_ROOT/demo_experiments/000070/evaluation/cache_2000.pkl CH-CNN
+	```
+
+	Results are stored under `$PROJ_ROOT/view_estimation_correspondences/eval_scripts/visualizations/qualitative_comparison`.
+
+
+# Generating error distribution histograms
+
+	```
+	# Assumes you ran above evaluation.
+	# $PROJ_ROOT is the location of the root of this project.
+	python visualize_error_distribution.py \
+		$PROJ_ROOT/demo_experiments/000067/evaluation/cache_6000.pkl R4CNN
+	python visualize_error_distribution.py \
+		$PROJ_ROOT/demo_experiments/000070/evaluation/cache_2000.pkl CH-CNN
+	```
+
+	Results are stored under `$PROJ_ROOT/view_estimation_correspondences/eval_scripts/visualizations/error_distribution`.

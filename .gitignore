@@ -19,4 +19,6 @@ train/old/
 train/progress_web_server/.env/
 view_estimation_correspondences/eval_scripts/visualizations
 *.caffemodel
+acc_mederr_*.txt
+*.pkl
 

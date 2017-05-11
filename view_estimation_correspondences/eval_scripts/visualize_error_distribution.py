@@ -66,7 +66,7 @@ if __name__ == '__main__':
     parser.add_argument('cache_file', type=str, help='Path to the cached predictions')
     parser.add_argument('model_name', type=str, help='The name of the model (appears as the plot title)')
     parser.add_argument('--zoom', action='store_true', help='Whether to zoom in on the tail')
-    parser.add_argument('--lmdbs_root', type=str, help='Root of the correspondence LMDBs')
+    parser.add_argument('--lmdbs_root', type=str, help='Root of the keypoint LMDBs')
 
     args = parser.parse_args()
     if args.lmdbs_root:

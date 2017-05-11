@@ -23,6 +23,9 @@ def generate_lmdb_from_data(lmdb_data_root, lmdb_root, keys, is_pascal_test=Fals
     image_data_root = os.path.join(lmdb_data_root, 'image')
     image_lmdb_root = os.path.join(lmdb_root, 'image_lmdb')
 
+    binary_keypoint_map_data_root = os.path.join(lmdb_data_root, 'keypoint_loc')
+    binary_keypoint_map_lmdb_root = os.path.join(lmdb_root, 'keypoint_loc_lmdb')
+
     gaussian_keypoint_map_data_root = os.path.join(lmdb_data_root, 'gaussian_keypoint_map')
     gaussian_keypoint_map_lmdb_root = os.path.join(lmdb_root, 'gaussian_keypoint_map_lmdb')
 
@@ -59,6 +62,8 @@ def generate_lmdb_from_data(lmdb_data_root, lmdb_root, keys, is_pascal_test=Fals
     # Image
     processes.append(Process(target=utils.create_image_lmdb, args=(image_data_root, image_lmdb_root, keys)))
     # Keypoint maps
+    if is_pascal_test:
+        processes.append(Process(target=utils.create_image_lmdb, args=(binary_keypoint_map_data_root, binary_keypoint_map_lmdb_root, keys)))
     processes.append(Process(target=utils.create_image_lmdb, args=(gaussian_keypoint_map_data_root, gaussian_keypoint_map_lmdb_root, keys)))
     processes.append(Process(target=utils.create_tensor_lmdb, args=(euclidean_dt_map_data_root, euclidean_dt_map_lmdb_root, keys)))
     processes.append(Process(target=utils.create_tensor_lmdb, args=(manhattan_dt_map_data_root, manhattan_dt_map_lmdb_root, keys)))
