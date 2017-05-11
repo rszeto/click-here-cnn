@@ -15,6 +15,7 @@ import scipy
 from scipy import signal
 import matplotlib.pyplot as plt
 import pdb
+import argparse
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(BASE_DIR)
@@ -401,15 +402,21 @@ def join_paths(base, dir):
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--pascal_test_only', action='store_true', help='Flag indicating that only the PASCAL 3D+ test data should be generated.')
+    args = parser.parse_args()
+
     # Create CSVs
-    utils.create_syn_image_keypoint_csvs()
+    if not args.pascal_test_only:
+        utils.create_syn_image_keypoint_csvs()
     utils.create_pascal_image_keypoint_csvs()
 
-    # Generate synthetic train data with data augmentation (horizontal flip)
-    generate_lmdb_data(g_syn_train_image_keypoint_info_file, g_corresp_syn_train_lmdb_data_folder, True)
-    # Generate synthetic test data with no data augmentation
-    generate_lmdb_data(g_syn_test_image_keypoint_info_file, g_corresp_syn_test_lmdb_data_folder, False)
-    # Create PASCAL training data with data augmentation (horizontal flip)
-    generate_lmdb_data(g_pascal_train_image_keypoint_info_file, g_corresp_pascal_train_lmdb_data_folder, True)
+    if not args.pascal_test_only:
+        # Generate synthetic train data with data augmentation (horizontal flip)
+        generate_lmdb_data(g_syn_train_image_keypoint_info_file, g_corresp_syn_train_lmdb_data_folder, True)
+        # Generate synthetic test data with no data augmentation
+        generate_lmdb_data(g_syn_test_image_keypoint_info_file, g_corresp_syn_test_lmdb_data_folder, False)
+        # Create PASCAL training data with data augmentation (horizontal flip)
+        generate_lmdb_data(g_pascal_train_image_keypoint_info_file, g_corresp_pascal_train_lmdb_data_folder, True)
     # Create PASCAL test data without data augmentation
     generate_lmdb_data(g_pascal_test_image_keypoint_info_file, g_corresp_pascal_test_lmdb_data_folder, False)

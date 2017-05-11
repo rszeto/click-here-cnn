@@ -11,8 +11,8 @@ g_render4cnn_root_folder = os.path.dirname(os.path.abspath(__file__))
 # ------------------------------------------------------------
 g_blender_executable_path = '/z/home/szetor/sw/blender-2.71/blender' #!! MODIFY if necessary
 g_matlab_executable_path = 'matlab' # !! MODIFY if necessary
-g_pycaffe_path = '/z/home/szetor/sw/caffe-r4cnn/python'
-g_data_folder = os.path.abspath(os.path.join(g_render4cnn_root_folder, 'data'))
+g_pycaffe_path = '/z/home/szetor/sw/caffe-r4cnn/python' # !! MODIFY
+g_data_folder = '/media/hdd1/fresh_RenderForCNN-data' # !! MODIFY. If generating training data, should be >2 TB
 g_datasets_folder = os.path.abspath(os.path.join(g_render4cnn_root_folder, 'datasets'))
 g_shapenet_root_folder = os.path.join(g_datasets_folder, 'shapenet-correspondences')
 g_pascal3d_root_folder = os.path.join(g_datasets_folder, 'pascal3d')
@@ -114,8 +114,8 @@ g_test_batch_size = 256
 
 # Image-keypoint info
 g_angle_names = ['azimuth', 'elevation', 'tilt']
-# g_max_num_syn_test_images = 5000
-g_max_num_syn_test_images = 100
+# g_max_num_syn_test_instances = 5000
+g_max_num_syn_test_instances = 100
 g_image_keypoint_info_folder = os.path.join(g_data_folder, 'image_keypoint_info')
 g_syn_train_image_keypoint_info_file = os.path.join(g_image_keypoint_info_folder, 'syn_train_image_keypoint_info.csv')
 g_syn_test_image_keypoint_info_file = os.path.join(g_image_keypoint_info_folder, 'syn_test_image_keypoint_info.csv')
@@ -130,8 +130,7 @@ g_corresp_pascal_train_lmdb_data_folder = os.path.join(g_corresp_lmdb_data_folde
 g_corresp_pascal_test_lmdb_data_folder = os.path.join(g_corresp_lmdb_data_folder, 'pascal', 'test')
 
 # LMDB folders
-# g_corresp_lmdb_folder = os.path.join(g_data_folder, 'lmdb')
-g_corresp_lmdb_folder = os.path.join('/media/hdd1/RenderForCNN-data', 'lmdb')
+g_corresp_lmdb_folder = os.path.join(g_data_folder, 'lmdb')
 g_corresp_syn_train_lmdb_folder = os.path.join(g_corresp_lmdb_folder, 'syn', 'train')
 g_corresp_syn_test_lmdb_folder = os.path.join(g_corresp_lmdb_folder, 'syn', 'test')
 g_corresp_pascal_train_lmdb_folder = os.path.join(g_corresp_lmdb_folder, 'pascal', 'train')
@@ -144,6 +143,8 @@ g_alexnet_weights_path = os.path.join(g_corresp_model_root_folder, 'bvlc_alexnet
 
 # Experiments folder
 g_experiments_root_folder = os.path.join(g_render4cnn_root_folder, 'experiments')
+# Demo experiments folder
+g_demo_experiments_root_folder = os.path.join(g_render4cnn_root_folder, 'demo_experiments')
 # Evaluation folder
 g_evaluation_scripts_folder = os.path.join(g_render4cnn_root_folder, 'view_estimation_correspondences', 'eval_scripts')
 # Folder for plots and visualizations

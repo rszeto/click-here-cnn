@@ -113,8 +113,7 @@ g_test_batch_size = 256
 
 # Image-keypoint info
 g_angle_names = ['azimuth', 'elevation', 'tilt']
-# g_max_num_syn_test_images = 5000
-g_max_num_syn_test_images = 100
+g_max_num_syn_test_instances = 5000
 g_image_keypoint_info_folder = os.path.join(g_data_folder, 'image_keypoint_info')
 g_syn_train_image_keypoint_info_file = os.path.join(g_image_keypoint_info_folder, 'syn_train_image_keypoint_info.csv')
 g_syn_test_image_keypoint_info_file = os.path.join(g_image_keypoint_info_folder, 'syn_test_image_keypoint_info.csv')
@@ -142,6 +141,8 @@ g_alexnet_weights_path = os.path.join(g_corresp_model_root_folder, 'bvlc_alexnet
 
 # Experiments folder
 g_experiments_root_folder = os.path.join(g_render4cnn_root_folder, 'experiments')
+# Demo experiments folder
+g_demo_experiments_root_folder = os.path.join(g_render4cnn_root_folder, 'demo_experiments')
 # Evaluation folder
 g_evaluation_scripts_folder = os.path.join(g_render4cnn_root_folder, 'view_estimation_correspondences', 'eval_scripts')
 # Folder for plots and visualizations

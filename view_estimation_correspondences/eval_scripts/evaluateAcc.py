@@ -326,12 +326,16 @@ if __name__ == '__main__':
     parser.add_argument('exp_num', type=int, help='The experiment number')
     parser.add_argument('iter_num', type=int, help='The iteration number of the snapshot')
     parser.add_argument('--cache_preds', action='store_true', help='Whether to save the predictions to disk if they don\'t exist, or use the existing cache if they do')
+    parser.add_argument('--demo', action='store_true', help='Flag to use the included demo models')
     args = parser.parse_args()
 
     print('Evaluating weights for experiment %d, iteration %d' % (args.exp_num, args.iter_num))
 
     # First, locate the experiment
-    exp_dir_list = glob.glob(os.path.join(gv.g_experiments_root_folder, '%06d_*' % args.exp_num))
+    if args.demo:
+        exp_dir_list = glob.glob(os.path.join(gv.g_demo_experiments_root_folder, '%06d*' % args.exp_num))
+    else:
+        exp_dir_list = glob.glob(os.path.join(gv.g_experiments_root_folder, '%06d*' % args.exp_num))
     if len(exp_dir_list) == 0:
         print('Failed to find experiment %d' % args.exp_num)
         exit()

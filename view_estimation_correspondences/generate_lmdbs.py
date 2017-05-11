@@ -3,6 +3,7 @@ import sys
 import time
 from multiprocessing import Process
 import re
+import argparse
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(BASE_DIR)
@@ -95,13 +96,17 @@ def generate_lmdb(data_root_path, lmdb_root_path, is_pascal_test=False):
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--pascal_test_only', action='store_true', help='Flag indicating that only the PASCAL 3D+ test data should be generated.')
+    args = parser.parse_args()
 
-    # Synthetic training data
-    generate_lmdb(gv.g_corresp_syn_train_lmdb_data_folder, gv.g_corresp_syn_train_lmdb_folder)
-    # Synthetic validation data
-    generate_lmdb(gv.g_corresp_syn_test_lmdb_data_folder, gv.g_corresp_syn_test_lmdb_folder)
-    # PASCAL training data
-    generate_lmdb(gv.g_corresp_pascal_train_lmdb_data_folder, gv.g_corresp_pascal_train_lmdb_folder)
+    if not args.pascal_test_only:
+        # Synthetic training data
+        generate_lmdb(gv.g_corresp_syn_train_lmdb_data_folder, gv.g_corresp_syn_train_lmdb_folder)
+        # Synthetic validation data
+        generate_lmdb(gv.g_corresp_syn_test_lmdb_data_folder, gv.g_corresp_syn_test_lmdb_folder)
+        # PASCAL training data
+        generate_lmdb(gv.g_corresp_pascal_train_lmdb_data_folder, gv.g_corresp_pascal_train_lmdb_folder)
     # PASCAL test data
     generate_lmdb(gv.g_corresp_pascal_test_lmdb_data_folder, gv.g_corresp_pascal_test_lmdb_folder, is_pascal_test=True)
 
