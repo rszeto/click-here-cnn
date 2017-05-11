@@ -8,9 +8,7 @@
 global_variables.m
 global_variables.py
 data
-datasets/pascal3d
-datasets/shapenetcore
-datasets/sun2012pascalformat
+datasets/
 caffe_models/*.zip
 *deformed*
 experiments

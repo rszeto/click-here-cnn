@@ -36,7 +36,7 @@ def load_one_category_shape_list(shape_synset):
         # Compute how many renders of the current model should be produced
         # First part divides num. renders across all models, second part adds one to some models to account for remainder
         view_num = g_syn_images_num_per_category/len(shape_md5_list) + int(i % len(shape_md5_list) < g_syn_images_num_per_category % len(shape_md5_list))
-        shape_list.append(((shape_md5, os.path.join(g_shapenet_root_folder, shape_synset, shape_md5, 'vertexnormal_model', 'model.obj'), view_num, os.path.join(g_shapenet_root_folder, shape_synset, shape_md5, 'keypoints.json'))))
+        shape_list.append(((shape_md5, os.path.join(g_shapenet_root_folder, shape_synset, shape_md5, 'model.obj'), view_num, os.path.join(g_shapenet_root_folder, shape_synset, shape_md5, 'keypoints.json'))))
     return shape_list
 
 '''
