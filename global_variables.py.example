@@ -152,6 +152,3 @@ g_visualizations_root_folder = os.path.join(g_evaluation_scripts_folder, 'visual
 g_qual_comp_folder = os.path.join(g_visualizations_root_folder, 'qualitative_comparison')
 # Folder for error distribution visualization
 g_error_dist_vis_folder = os.path.join(g_visualizations_root_folder, 'error_distribution')
-
-# PBS scripts path
-g_pbs_script_dir = os.path.join(g_render4cnn_root_folder, 'pbs_scripts')
