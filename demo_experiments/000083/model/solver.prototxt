@@ -1,0 +1,15 @@
+test_net: "/z/home/szetor/Documents/DENSO_VCA/RenderForCNN/experiments/000083_03-11-2017_12:52:38/model/test.prototxt"
+snapshot_prefix: "snapshot"
+max_iter: 100000
+base_lr: 0.0001
+snapshot: 2000
+momentum: 0.9
+solver_mode: GPU
+train_net: "/z/home/szetor/Documents/DENSO_VCA/RenderForCNN/experiments/000083_03-11-2017_12:52:38/model/train.prototxt"
+test_iter: 15
+momentum2: 0.999
+lr_policy: "fixed"
+weight_decay: 0.0005
+type: "Adam"
+display: 20
+test_interval: 2000

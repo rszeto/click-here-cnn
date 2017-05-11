@@ -1,0 +1,1 @@
+CH-CNN with Euclidean keypoint map

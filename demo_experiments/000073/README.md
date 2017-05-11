@@ -1,0 +1,1 @@
+CH-CNN with blank keypoint map and class at test time

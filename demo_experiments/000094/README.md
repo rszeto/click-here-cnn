@@ -1,0 +1,1 @@
+CH-CNN with keypoint map only

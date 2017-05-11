@@ -1,0 +1,1 @@
+CH-CNN with Manhattan keypoint map

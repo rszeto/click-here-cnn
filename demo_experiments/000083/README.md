@@ -1,0 +1,1 @@
+CH-CNN with perturbed keypoint at test time (sigma=25)

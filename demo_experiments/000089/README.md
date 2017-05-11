@@ -1,0 +1,1 @@
+Uniform weight map used for keypoint features

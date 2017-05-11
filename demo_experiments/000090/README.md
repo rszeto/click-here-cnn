@@ -1,0 +1,1 @@
+Gaussian weight map used for keypoint features
