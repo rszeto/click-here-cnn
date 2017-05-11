@@ -11,9 +11,10 @@ g_render4cnn_root_folder = os.path.dirname(os.path.abspath(__file__))
 # ------------------------------------------------------------
 g_blender_executable_path = 'blender' #!! MODIFY if necessary
 g_matlab_executable_path = 'matlab' # !! MODIFY if necessary
-g_data_folder = os.path.abspath(os.path.join(g_render4cnn_root_folder, 'data'))
+g_pycaffe_path = '/path/to/caffe/python' # !! MODIFY
+g_data_folder = '/path/to/large/fs' # !! MODIFY. If generating training data, should be >2 TB
 g_datasets_folder = os.path.abspath(os.path.join(g_render4cnn_root_folder, 'datasets'))
-g_shapenet_root_folder = os.path.join(g_datasets_folder, 'shapenetcore')
+g_shapenet_root_folder = os.path.join(g_datasets_folder, 'shapenet-correspondences')
 g_pascal3d_root_folder = os.path.join(g_datasets_folder, 'pascal3d')
 g_sun2012pascalformat_root_folder = os.path.join(g_datasets_folder, 'sun2012pascalformat')
 
@@ -42,7 +43,7 @@ g_syn_bkg_folder = os.path.join(g_sun2012pascalformat_root_folder, 'JPEGImages')
 g_syn_cluttered_bkg_ratio = 0.8
 g_blank_blend_file_path = os.path.join(g_render4cnn_root_folder, 'render_pipeline/blank.blend') 
 g_syn_images_num_per_category = 200000
-g_syn_rendering_thread_num = 20
+g_syn_rendering_thread_num = 4
 
 # Rendering is computational demanding. you may want to consider using multiple servers.
 #g_hostname_synset_idx_map = {'<server1-hostname>': [0,1],
@@ -50,11 +51,13 @@ g_syn_rendering_thread_num = 20
 #                             '<server3-hostname>': [5,6,7],
 #                             '<server4-hostname>':[8,9], 
 #                             '<server5-hostname>':[10,11]}
-g_hostname_synset_idx_map = {socket.gethostname(): range(12)}
+# Only process buses, cars, and motorbikes for CH-CNN
+g_hostname_synset_idx_map = {socket.gethostname(): [4,5,8]}
 
 # Crop and overlay is IO-heavy, running on local FS is much faster
-g_crop_hostname_synset_idx_map = {socket.gethostname(): range(12)}
-g_overlay_hostname_synset_idx_map = {socket.gethostname(): range(12)}
+# Only process buses, cars, and motorbikes for CH-CNN
+g_crop_hostname_synset_idx_map = {socket.gethostname(): [4,5,8]}
+g_overlay_hostname_synset_idx_map = {socket.gethostname(): [4,5,8]}
 
 # view and truncation distribution estimation
 g_matlab_kde_folder = os.path.join(g_render4cnn_root_folder, 'render_pipeline/kde/matlab_kde_package') 
@@ -83,7 +86,7 @@ g_syn_light_environment_energy_highbound = 1
 # VIEW_ESTIMATION
 # ------------------------------------------------------------
 g_syn_images_lmdb_folder = os.path.join(g_data_folder, 'syn_lmdbs')
-g_syn_images_lmdb_pathname_prefix = '/ShapeNetDL/projects/render4cnn/syn_lmdb' #os.path.join(g_syn_images_lmdb_folder, 'syn_lmdb')
+g_syn_images_lmdb_pathname_prefix = os.path.join(g_syn_images_lmdb_folder, 'syn_lmdbs')
 g_syn_images_resize_dim = 227
 g_images_resize_dim = 227
 
@@ -91,7 +94,7 @@ g_real_images_folder = os.path.join(g_data_folder, 'real_images')
 g_real_images_voc12val_det_bbox_folder = os.path.join(g_real_images_folder, 'voc12val_det_bbox')
 g_real_images_voc12val_easy_gt_bbox_folder = os.path.join(g_real_images_folder, 'voc12val_easy_gt_bbox')
 g_real_images_voc12train_all_gt_bbox_folder = os.path.join(g_real_images_folder, 'voc12train_all_gt_bbox')
-g_real_images_voc12train_flip = 1
+g_real_images_voc12train_flip = 0
 g_real_images_voc12train_aug_n = 1
 g_real_images_voc12train_jitter_IoU = 1
 g_real_images_lmdb_folder = os.path.join(g_data_folder, 'real_lmdbs')
@@ -103,6 +106,51 @@ g_rcnn_detection_bbox_mat_filelist = os.path.join(g_detection_results_folder, 'b
 # testing
 g_caffe_param_file = os.path.join(g_render4cnn_root_folder,'caffe_models', 'render4cnn_3dview.caffemodel') 
 g_caffe_deploy_file = os.path.join(g_render4cnn_root_folder, 'caffe_models', 'deploy.prototxt') 
-g_image_mean_file = os.path.join(g_render4cnn_root_folder, 'caffe_models', 'imagenet_mean.npy') 
+g_image_mean_file = os.path.join(g_render4cnn_root_folder, 'caffe_models', 'imagenet_mean.npy')
+g_image_mean_binaryproto_file = os.path.join(g_render4cnn_root_folder, 'train', 'imagenet_mean_227x227.binaryproto')
 g_caffe_prob_keys = ['fc-azimuth','fc-elevation','fc-tilt']
-g_test_batch_size = 64
+g_test_batch_size = 256
+
+# Image-keypoint info
+g_angle_names = ['azimuth', 'elevation', 'tilt']
+# g_max_num_syn_test_images = 5000
+g_max_num_syn_test_images = 100
+g_image_keypoint_info_folder = os.path.join(g_data_folder, 'image_keypoint_info')
+g_syn_train_image_keypoint_info_file = os.path.join(g_image_keypoint_info_folder, 'syn_train_image_keypoint_info.csv')
+g_syn_test_image_keypoint_info_file = os.path.join(g_image_keypoint_info_folder, 'syn_test_image_keypoint_info.csv')
+g_pascal_train_image_keypoint_info_file = os.path.join(g_image_keypoint_info_folder, 'pascal_train_image_keypoint_info.csv')
+g_pascal_test_image_keypoint_info_file = os.path.join(g_image_keypoint_info_folder, 'pascal_test_image_keypoint_info.csv')
+
+# LMDB data folders
+g_corresp_lmdb_data_folder = os.path.join(g_data_folder, 'lmdb_data')
+g_corresp_syn_train_lmdb_data_folder = os.path.join(g_corresp_lmdb_data_folder, 'syn', 'train')
+g_corresp_syn_test_lmdb_data_folder = os.path.join(g_corresp_lmdb_data_folder, 'syn', 'test')
+g_corresp_pascal_train_lmdb_data_folder = os.path.join(g_corresp_lmdb_data_folder, 'pascal', 'train')
+g_corresp_pascal_test_lmdb_data_folder = os.path.join(g_corresp_lmdb_data_folder, 'pascal', 'test')
+
+# LMDB folders
+g_corresp_lmdb_folder = os.path.join(g_data_folder, 'lmdb')
+g_corresp_syn_train_lmdb_folder = os.path.join(g_corresp_lmdb_folder, 'syn', 'train')
+g_corresp_syn_test_lmdb_folder = os.path.join(g_corresp_lmdb_folder, 'syn', 'test')
+g_corresp_pascal_train_lmdb_folder = os.path.join(g_corresp_lmdb_folder, 'pascal', 'train')
+g_corresp_pascal_test_lmdb_folder = os.path.join(g_corresp_lmdb_folder, 'pascal', 'test')
+
+# correspondence model location
+g_corresp_model_root_folder = os.path.join(g_render4cnn_root_folder, 'train')
+g_render4cnn_weights_path = os.path.join(g_corresp_model_root_folder, 'render4cnn_3dview.caffemodel')
+g_alexnet_weights_path = os.path.join(g_corresp_model_root_folder, 'bvlc_alexnet.caffemodel')
+
+# Experiments folder
+g_experiments_root_folder = os.path.join(g_render4cnn_root_folder, 'experiments')
+# Evaluation folder
+g_evaluation_scripts_folder = os.path.join(g_render4cnn_root_folder, 'view_estimation_correspondences', 'eval_scripts')
+# Folder for plots and visualizations
+g_visualizations_root_folder = os.path.join(g_evaluation_scripts_folder, 'visualizations')
+
+# Folder for qualitative comparison between two models
+g_qual_comp_folder = os.path.join(g_visualizations_root_folder, 'qualitative_comparison')
+# Folder for error distribution visualization
+g_error_dist_vis_folder = os.path.join(g_visualizations_root_folder, 'error_distribution')
+
+# PBS scripts path
+g_pbs_script_dir = os.path.join(g_render4cnn_root_folder, 'pbs_scripts')
