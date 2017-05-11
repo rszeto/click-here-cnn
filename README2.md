@@ -1,11 +1,10 @@
 # TODOS
 
-* Delete original ShapeNet unzip script
+* Move experiments
+* Add .caffemodels
 * Update training curve plot code
 * Add instructions for generating and training models
 * Add note to install Caffe first
-* Add caffemodels
-* Test and document visualization code
 
 # Generate synthetic data
 
