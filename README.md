@@ -33,9 +33,9 @@ First, install the PASCAL 3D+ dataset as follows. The Bash scripts in this readm
 
 ### Set up weights
 
-The weights to our models are included in an external file available [here](https://umich.box.com/shared/static/ukikg3hogr0azsn2o1dheyq4jmj07qj1.gz). Download this folder to the project root, and then extract the contents to the `demo_experiments` folder:
+The weights to our models are included in an external file available [here](http://web.eecs.umich.edu/~szetor/media/ch-cnn-model-weights.tar.gz). Download this folder to the project root, and then extract the contents to the `demo_experiments` folder:
 
-	wget https://umich.box.com/shared/static/ukikg3hogr0azsn2o1dheyq4jmj07qj1.gz -O ch-cnn-model-weights.tar.gz
+	wget http://web.eecs.umich.edu/~szetor/media/ch-cnn-model-weights.tar.gz
 	tar -xzvf ch-cnn-model-weights.tar.gz -C demo_experiments
 
 ### Set up Caffe
