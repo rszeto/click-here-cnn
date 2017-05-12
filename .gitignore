@@ -13,7 +13,6 @@ caffe_models/*.zip
 *deformed*
 experiments
 *\.idea*
-caffe-r4cnn/
 pbs_scripts/
 train/old/
 train/progress_web_server/.env/

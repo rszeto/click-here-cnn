@@ -1,4 +1,4 @@
 [submodule "caffe-r4cnn"]
-path = caffe-r4cnn
-url = https://github.com/rszeto/caffe-r4cnn.git
+	path = caffe-r4cnn
+	url = https://github.com/rszeto/caffe-r4cnn.git
 
