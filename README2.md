@@ -4,6 +4,7 @@
 * Add .caffemodels
 * Update training curve plot code
 * Add instructions for generating and training models
+* Add caffe-r4cnn as submodule
 * Add note to install Caffe first
 
 # Generate synthetic data
@@ -100,7 +101,27 @@ These are the models whose results are included in CH-CNN paper.
 	```
 	cd view_estimation_correspondences/eval_scripts
 	python evaluateAcc.py 67 6000 --demo --cache_preds
+	python evaluateAcc.py 68 0 --demo --cache_preds
 	python evaluateAcc.py 70 2000 --demo --cache_preds
+	python evaluateAcc.py 71 0 --demo --cache_preds
+	python evaluateAcc.py 72 0 --demo --cache_preds
+	python evaluateAcc.py 73 0 --demo --cache_preds
+	python evaluateAcc.py 78 0 --demo --cache_preds
+	python evaluateAcc.py 80 0 --demo --cache_preds
+	python evaluateAcc.py 81 0 --demo --cache_preds
+	python evaluateAcc.py 82 0 --demo --cache_preds
+	python evaluateAcc.py 83 0 --demo --cache_preds
+	python evaluateAcc.py 84 0 --demo --cache_preds
+	python evaluateAcc.py 85 0 --demo --cache_preds
+	python evaluateAcc.py 86 0 --demo --cache_preds
+	python evaluateAcc.py 87 0 --demo --cache_preds
+	python evaluateAcc.py 89 2000 --demo --cache_preds
+	python evaluateAcc.py 90 2000 --demo --cache_preds
+	python evaluateAcc.py 93 2000 --demo --cache_preds
+	python evaluateAcc.py 94 2000 --demo --cache_preds
+	python evaluateAcc.py 98 4400 --demo --cache_preds
+	python evaluateAcc.py 99 2000 --demo --cache_preds
+	python evaluateAcc.py 100 2000 --demo --cache_preds
 	```
 
 	Results are stored in the `evaluation` folder under each experiment's folder.
