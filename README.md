@@ -1,178 +1,175 @@
-## Render for CNN: *Viewpoint Estimation in Images Using CNNs Trained with Rendered 3D Model Views*
-Created by <a href="http://ai.stanford.edu/~haosu/" target="_blank">Hao Su</a>, <a href="http://web.stanford.edu/~rqi/" target="_blank">Charles R. Qi</a>, <a href="http://web.stanford.edu/~yangyan/" target="_blank">Yangyan Li</a>, <a href="http://geometry.stanford.edu/member/guibas/" target="_blank">Leonidas J. Guibas</a> from Stanford University.
+# Click Here: Human-Localized Keypoints as Guidance for Viewpoint Estimation
+Ryan Szeto and Jason J. Corso, University of Michigan
 
-### Introduction
+## Using this code
 
-Our work was initially described in an [arXiv tech report](http://arxiv.org/abs/1505.05641) and will appear as an ICCV 2015 paper. Render for CNN is a scalable image synthesis pipeline for generating millions of training images for high-capacity models such as deep CNNs. We demonstrated how to use this pipeline, together with specially designed network architecture, to train CNNs to learn viewpoints of objects from millions of synthetic images and real images. In this repository, we provide both the rendering pipeline codes and off-the-shelf viewpoint estimator for PASCAL3D+ objects.
+If you use this work in your research, please cite the following paper:
 
+	@article{szeto2017click,
+	  title={Click Here: Human-Localized Keypoints as Guidance for Viewpoint Estimation},
+	  author={Szeto, Ryan and Corso, Jason J},
+	  journal={arXiv preprint arXiv:1703.09859},
+	  year={2017}
+	}
 
-### License
+I ran this code from scratch, so it should work. However, feel free to contact me at `szetor [at] umich [dot] edu` if you have trouble.
 
-Render for CNN is released under the MIT License (refer to the LICENSE file for details).
+## Introduction
 
+This code implements the work described in the arXiv report ["Click Here: Human-Localized Keypoints as Guidance for Viewpoint Estimation"](https://arxiv.org/abs/1703.09859). It extends the [Render for CNN project](https://github.com/shapenet/RenderForCNN) by generating semantic keypoint data alongside rendered (or real) image data. This code lets you generate the training and testing data that we used in our paper's experiments, as well as reproduce the numbers presented in the paper.
 
-### Citing Render for CNN
-If you find Render for CNN useful in your research, please consider citing:
+Please note that this code is insanely inefficient storage-wise, since it stores dense keypoint maps and keypoint class vectors on disk as LMDBs. Excluding code and model weights, you only need about 20 GB to run our pre-trained models on the PASCAL 3D+ test set, but you need about 3 TB for our entire training process over synthetic and real image examples. We are implementing a more efficient version of this code in TensorFlow, which might be made available someday...
 
-    @InProceedings{Su_2015_ICCV,
-        Title={Render for CNN: Viewpoint Estimation in Images Using CNNs Trained with Rendered 3D Model Views},
-        Author={Su, Hao and Qi, Charles R. and Li, Yangyan and Guibas, Leonidas J.},
-        Booktitle={The IEEE International Conference on Computer Vision (ICCV)},
-        month = {December},
-        Year= {2015}
-    }
+## Reproducing our results
 
-### Contents
-1. [Render for CNN Image Synthesis Pipeline](#render-for-cnn-image-synthesis-pipeline)
-2. [Off-the-shelf Viewpoint Estimator](#off-the-shelf-viewpoint-estimator)
-3. [Testing on VOC12 val](#testing-on-voc12-val)
-4. [Training your Own Models](#training-your-own-models)
+In this project, we have included the pre-trained models used to produce the results in the paper. This section outlines how to run them.
 
-###  Render for CNN Image Synthesis Pipeline
+### Set up dataset
 
-**Prerequisites**
+First, install the PASCAL 3D+ dataset as follows. The Bash scripts in this readme assume you are starting from this project's root directory unless otherwise noted.
 
-0. Blender (tested with Blender 2.71 on 64-bit Linux). You can get it from <a href="http://www.blender.org/features/past-releases/2-71/" target="_blank">Blender website</a> for free.
+	cd datasets
+	./get_pascal3d.sh
 
-1. MATLAB (tested with 2014b on 64-bit Linux). You also need to compile the external kde package in `render_pipeline/kde/matlab_kde_package` by following the `README.txt` file in that folder.
+### Set up weights
 
-2. Datasets (ShapeNet, PASCAL3D+, SUN2012) [**not required for the demo**]. If you already have the same datasets (as in urls specified in the shell scripts) downloaded, you can build soft links to the datasets with the same pathname as specified in the shell scripts. Otherwise, just do the following steps under project root folder:
-	
-    <pre>
-    bash dataset/get_shapenet.sh
-    bash dataset/get_sun2012pascalformat.sh
-    bash dataset/get_pascal3d.sh
-    </pre>
-    
-**Set up paths**
+The weights to our models are included in an external file available [here](https://umich.box.com/shared/static/ukikg3hogr0azsn2o1dheyq4jmj07qj1.gz). Download this folder to the project root, and then extract the contents to the `demo_experiments` folder:
 
-All data and code paths should be set in `global_variables.py`. We have provided you an example version `global_variables.py.example`. You only need to copy or rename the example file and **modify the Blender and MATLAB path** in it (in default the paths are set to `blend` and `matlab`). All other paths are relative to the project root folder and should be fine.
+	wget https://umich.box.com/shared/static/ukikg3hogr0azsn2o1dheyq4jmj07qj1.gz -O ch-cnn-model-weights.tar.gz
+	tar -xzvf ch-cnn-model-weights.tar.gz -C demo_experiments
+
+### Set up Caffe
+
+Our code uses a customized version of Caffe. It is based on Caffe RC1, and the main difference is that it includes the custom layers from the Caffe version used by Render for CNN (their Caffe source code is available [here](https://github.com/charlesq34/caffe-render-for-cnn)). To initialize the submodule, run the following commands:
+
+	git submodule init
+	git submodule update
+
+Then use whatever means you wish (Make/CMake/fellow grad student) to install the customized Caffe. Remember the installation path when you set up the global variables.
+
+### Set up global variables
+
+Copy the example global variables file, edit the paths as instructed, and propagate the variables to the demo experiment setups.
 
 	cp global_variables.py.example global_variables.py
-    
-After setting Blender and MATLAB paths in `global_variables.py`, run script to set up MATLAB global variable file.
-
+	### MODIFY global_variables.py ###
 	python setup.py
+	python view_estimation_correspondences/eval_scripts/init_demo_experiments.py
 
-#### Demo of synthesis pipeline
-This small demo at `demo_render` shows how we get cropped, background overlaid images of objects from a 3D model. It also helps verity that you have all enviroment set up. To run the demo, cd into project root folder and follow steps below.
+### Generate PASCAL 3D+ LMDBs
 
-	cd demo_render
-	python run_demo.py
+Generate the test instance data, then generate the test LMDBs.
 
-#### Running large scale synthesis
+	cd view_estimation_correspondences
+	python generate_lmdb_data.py --pascal_test_only
+	python generate_lmdbs.py --pascal_test_only
 
-0. **Estimate viewpoint and truncation distributions** with KDE (kernal density estimation). If you haven't compiled the kde package, go to `render_pipeline/kde/matlab_kde_package/mex`, open MATLAB and run `makemex` in MATLAB to generate mex files.
-	
-    <pre>
-    cd render_pipeline/kde
-    </pre>
-    
-    Open MATLAB and run the following command (expect to see plots popping up). Viewpoint and truncation statistics will be saved to `data/view_statistics` and `data/truncation_statistics`. Samples generated from estimated distrubtion will be saved to `data/view_distribution` and `truncation_distribution`.
-    
-    <pre>
-    run_sampling;
-    </pre>
-    
-1. **Render images with Blender** This step is computationally heavy and may take a long time depending how powerful your computers are. It takes us around 8 hours to render 2.4M images on 6 multi-core servers. If you have multiple servers with shared filesystem, you can set `g_hostname_synset_idx_map` in `global_variables.py` accordingly. Note that currently models are directly from ShapeNet, deformed models will be released separately later. 
-    
-    <pre>
-    python render_pipeline/run_render.py
-    </pre>
-    
-    You can stop rendering at any time and execute following commands to crop and overlay background on images that have already been rendered. In default, rendered images will be saved at `data/syn_images`.
+### Run experiments
 
-2. **Crop images** This step is IO heavy and it takes around 1~2 hours on a multi-core server. SSD or high-end HDD disk could help a lot. In default, cropped images are saved to `data/syn_images_cropped`.
-    
-    <pre>
-    python render_pipeline/run_crop.py
-    </pre>
-    
-3. **Overlay backgrounds** Time consumption is similar to cropping step above. In default, background overlaid (also cropped from step above) images are saved to `data/syn_images_cropped_bkg_overlaid`.
-   
-    <pre>
-    python render_pipeline/run_overlay.py
-    </pre>
+Run the evaluation code on our demo models (located in `demo_experiments`). It takes about an hour on a NVIDIA GeForce GTX 980 Ti GPU for each experiment, so I recommend running this overnight and/or on a cluster environment, if possible.
 
-    If you'd like to get a file containing all synthesized image filenames and their labels (class, azimuth, elevation, tilt angles), we have some helper functions for that - just go look at `get_one_category_image_label_file` and `combine_files` in `view_estimation/data_prep_helper.py`, also refer to `view_estimation/prepare_training_data.py` for usage examples.
+	cd view_estimation_correspondences/eval_scripts
+	python evaluateAcc.py 67 6000 --demo --cache_preds
+	python evaluateAcc.py 68 0 --demo --cache_preds
+	python evaluateAcc.py 70 2000 --demo --cache_preds
+	python evaluateAcc.py 71 0 --demo --cache_preds
+	python evaluateAcc.py 72 0 --demo --cache_preds
+	python evaluateAcc.py 73 0 --demo --cache_preds
+	python evaluateAcc.py 78 0 --demo --cache_preds
+	python evaluateAcc.py 80 0 --demo --cache_preds
+	python evaluateAcc.py 81 0 --demo --cache_preds
+	python evaluateAcc.py 82 0 --demo --cache_preds
+	python evaluateAcc.py 83 0 --demo --cache_preds
+	python evaluateAcc.py 84 0 --demo --cache_preds
+	python evaluateAcc.py 85 0 --demo --cache_preds
+	python evaluateAcc.py 86 0 --demo --cache_preds
+	python evaluateAcc.py 87 0 --demo --cache_preds
+	python evaluateAcc.py 89 2000 --demo --cache_preds
+	python evaluateAcc.py 90 2000 --demo --cache_preds
+	python evaluateAcc.py 93 2000 --demo --cache_preds
+	python evaluateAcc.py 94 2000 --demo --cache_preds
+	python evaluateAcc.py 98 4400 --demo --cache_preds
+	python evaluateAcc.py 99 2000 --demo --cache_preds
+	python evaluateAcc.py 100 2000 --demo --cache_preds
 
-### Off-the-shelf Viewpoint Estimator
+Results are stored in `demo_experiments/<exp_num>/evaluation`.
 
-**Prerequisites**
+### Generate visualizations
 
-0. <a href="https://github.com/BVLC/caffe" target="_blank">Caffe</a> (with pycaffe compiled). For testing we support the new caffe interface and prototxt files (which uses "layer" instead of "layers" in prototxt file). You can follow <a href="http://caffe.berkeleyvision.org/installation.html" target="_blank">this webpage</a> for installation details.
+The above commands cache the scores for each rotation angle, which can be compared with the `visualize_predictions.py` script. The commands below compare the predictions of fine-tuned Render for CNN and our CH-CNN model.
 
-1. Download our pre-trained caffe model (~390MB). The model was trained on rendered images and VOC12 train set real images.
+	# $PROJ_ROOT is the location of the root of this project.
+	cd view_estimation_correspondences/eval_scripts
+	python visualize_predictions.py 6932 \
+		$PROJ_ROOT/demo_experiments/000067/evaluation/cache_6000.pkl R4CNN \
+		$PROJ_ROOT/demo_experiments/000070/evaluation/cache_2000.pkl CH-CNN
 
-    <pre>
-    cd caffe_models
-    sh fetch_model.sh
-    </pre>
+Results are stored under `$PROJ_ROOT/view_estimation_correspondences/eval_scripts/visualizations/qualitative_comparison`.
 
-**Set up paths**
+### Generate error distribution plots
 
-The steps are the same as above in Render for CNN Image Synthesis Pipeline.
+The distribution of errors for a model can be visualized with the `visualize_error_distribution.py` script. The commands below generate this plot for fine-tuned Render for CNN and our CH-CNN model.
 
-#### Demo of 3D viewpoint estimator
-This demo at `demo_view` shows how one can use our off-the-shelf viewpoint estimator. To estimate viewpoint of an example image of airplane, do the following.
+	# $PROJ_ROOT is the location of the root of this project.
+	python visualize_error_distribution.py \
+		$PROJ_ROOT/demo_experiments/000067/evaluation/cache_6000.pkl R4CNN
+	python visualize_error_distribution.py \
+		$PROJ_ROOT/demo_experiments/000070/evaluation/cache_2000.pkl CH-CNN
 
-    cd demo_view
-    python run_demo.py
+Results are stored under `$PROJ_ROOT/view_estimation_correspondences/eval_scripts/visualizations/error_distribution`.
 
-To visualize the estimated 3D viewpoint, run and see a rendered image of the viewpoint.
+## Generating training data
 
-    python run_visualize_3dview.py
+This section describes how to generate synthetic and real image training data with our code. Before you execute the steps below, make sure you have set up the PASCAL 3D+ dataset, Caffe and global variables as described in ["Reproducing our results"](#reproducing-our-results).
 
+### Set up datasets
 
-### Testing on VOC12 val
+You will need to download some auxiliary data and save the `.zip` files in the `datasets` folder. First, you need to download the following synsets from [ShapeNet](https://www.shapenet.org/): 02924116 (buses), 02958343 (cars), and 03790512 (motorcycles). Then, download our ShapeNet keypoints dataset [here](http://web.eecs.umich.edu/~jjcorso/extdelivery/shapenet-keypoints-1.0.zip). Finally, run the extraction scripts below:
 
-**Prerequisites**
+	cd datasets
+	./get_sun2012pascalformat.sh
+	./get_shapenet-correspondences.sh
 
-0. Caffe with python interface and pretrained caffe mdoel - as in requirement in [Off-the-shelf Viewpoint Estimator](#off-the-shelf-viewpoint-estimator).
+### Render synthetic images and keypoint information
 
-1. PASCAL3D+ dataset - if you haven't downloaded it. It will be used for preparing test images and evaluation.
-    
-    <pre>
-    bash dataset/get_pascal3d.sh
-    </pre>
+#### Compile mex code
 
-2. MATLAB for preparing test images.
+	cd render_pipeline/kde/matlab_kde_package/mex
+	matlab -nodisplay -r "makemex; quit;"
 
-**Set up paths**
+#### Generate viewpoint and truncation distributions with KDE
 
-The steps are the same as above in Render for CNN Image Synthesis Pipeline.
+	cd render_pipeline/kde
+	matlab -nodisplay -r "run_sampling; quit;"
 
-#### Evaluation of AVP-NV, Acc-pi/6 and MedErr
-For AVP-NV (Average Viewpoint Precision), both localization (from R-CNN) and viewpoint estimation (azimuth) are evaluated. For Acc-\pi/6 and MedErr, we evaluate on VOC12 val images without truncations and occlusions. For more details on definition of the metrics, please refer to the paper.
+#### Render, crop, and overlay backgrounds
 
-Firstly, we need to prepare the testing images from VOC12, by running:
+This takes many days on multiple cores. See the `global_variables.py.example` file for tips on how to make this as fast as possible.
 
-    python view_estimation/prepare_testing_data.py
+	cd render_pipeline
+	python run_render.py
+	python run_crop.py
+	python run_overlay.py
 
-Then, do evaluation by running:
+#### Generate training and testing LMDBs
 
-    python view_estimation/run_evaluation.py
+This takes at least a day on multiple cores.
 
-Results are displayed on screen and saved to `view_estimation/avp_test_results/avp_nv_results.txt` and `view_estimation/vp_test_results/acc_mederr_results.txt`
+	cd view_estimation_correspondences
+	python generate_lmdb_data.py
+	python generate_lmdbs.py
 
-### Training your Own Models
-For Caffe, go to <a href='https://github.com/charlesq34/caffe-render-for-cnn' target='_blank'>caffe-render-for-cnn</a> for the version with special loss layers.
+## Training our models
 
-To prepare training data, run the script below. This will genereate LMDB in the data folder.
+TODO
 
-    python view_estimation/prepare_training_data.py
-   
-To do the training, modify prototxt files in the `train` folder.
+### Monitoring training progress
 
-You can directly download synthetic images rendered by us at https://shapenet.cs.stanford.edu/media/syn_images_cropped_bkg_overlaid.tar
+TODO
 
-We name images in this package by their viewpoints. An example is the following: 
+<!--
+# TODOS
 
-synsetid_modelmd5_a010_e007_t016_d002.png
-
-where azimuth angle is 10 degree, elevation angle is 7 degree. 
-
-NOTE: The tilt angle should be flipped as to what is written in the filename. Here the tilt angle should be -16 (344) degree to make it consistent with PASCAL3D annotation.
-
-
-
+* Update training curve plot code
+* Add instructions for generating and training models
+-->

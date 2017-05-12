@@ -314,7 +314,7 @@ def create_pascal_image_keypoint_csvs():
     os.remove('valImgIds.txt')
 
     if not os.path.exists(gv.g_image_keypoint_info_folder):
-        os.mkdir(gv.g_image_keypoint_info_folder)
+        os.makedirs(gv.g_image_keypoint_info_folder)
     info_file_train = open(gv.g_pascal_train_image_keypoint_info_file, 'w')
     info_file_train.write(INFO_FILE_HEADER)
     info_file_test = open(gv.g_pascal_test_image_keypoint_info_file, 'w')
