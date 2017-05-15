@@ -233,3 +233,7 @@ A trained model can be evaluated with the same evaluation script as mentioned in
 	python evaluateAcc.py <exp_num> <iter_num> --cache_preds
 
 `iter_num` refers to the iteration number of the desired snapshot. `--cache_preds` is an optional flag that tells the script to save the angle scores to disk. This is useful for visualization (see ["Generate visualizations"](#generate-visualizations)).
+
+## Acknowledgements
+
+I would like to thank Hao Su and Charles R. Qi for providing their Render for CNN code.
