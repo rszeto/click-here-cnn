@@ -202,7 +202,16 @@ Progress logs are stored in `experiments/<exp_folder>/progress`.
 
 ### Monitoring training progress
 
-TODO
+From the progress plots, you can generate plots to visualize training progress. To do this, run the `plot_training_progress.py` script:
+
+	cd train
+	python plot_training_progress,py <exp_num>
+
+A plot of the training losses, validation losses, and angle-wise validation accuracies will be created in `experiments/<exp_folder>/progress`.
+
+### Training progress server
+
+This project includes a web server that you can use to track your experiments. TODO
 
 ### Evaluating a trained model
 
@@ -212,9 +221,3 @@ A trained model can be evaluated with the same evaluation script as mentioned in
 	python evaluateAcc.py <exp_num> <iter_num> --cache_preds
 
 `iter_num` refers to the iteration number of the desired snapshot. `--cache_preds` is an optional flag that tells the script to save the angle scores to disk. This is useful for visualization (see ["Generate visualizations"](#generate-visualizations)).
-
-<!--
-# TODOS
-
-* Update training curve plot code
--->
