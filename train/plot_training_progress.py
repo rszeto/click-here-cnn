@@ -148,6 +148,7 @@ def plot_acc(ax, train_info):
     ax.set_ylim([0, 3])
 
 def main(exp_num):
+    print('Creating training plots for experiment %d...' % exp_num)
     # Get experiment path
     exp_dir = glob.glob(os.path.join(g_experiments_root_folder, '%06d*' % exp_num))
     if len(exp_dir) == 0:
@@ -201,6 +202,7 @@ def main(exp_num):
     # Save plots to file
     plt.savefig(os.path.join(progress_dir, 'plots.png'))
 
+    print('Done.')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

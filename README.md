@@ -211,7 +211,19 @@ A plot of the training losses, validation losses, and angle-wise validation accu
 
 ### Training progress server
 
-This project includes a web server that you can use to track your experiments. TODO
+This project includes a web server that you can use to track your experiments. To run this module, you need the Python package [Bottle](http://bottlepy.org/docs/dev/index.html), which can be obtained with the following command:
+
+	pip install bottle
+
+To run the server, use the following commands:
+
+	cd train/progress_web_server
+	python server.py &
+
+Note that this only fetches existing files; it does not regenerate plots or evaluations automatically. To automatically regenerate plots, run the following command from the project root directory:
+
+	for file in `ls experiments`; do exp_num=`echo ${file:0:6} | sed -e 's/^0*//g'`; python "train/plot_training_progress.py" $exp_num; done
+
 
 ### Evaluating a trained model
 

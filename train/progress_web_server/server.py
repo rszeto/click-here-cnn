@@ -100,4 +100,4 @@ def plot(exp_name):
 def css():
     return static_file('style.css', root=SCRIPT_DIR)
 
-run(host='fstop.eecs.umich.edu', port=8080, debug=True)
+run(port=8080, debug=True)
