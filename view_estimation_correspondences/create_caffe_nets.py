@@ -1104,7 +1104,7 @@ def main(model_name, train_eval_with_pascal, initial_weights_path, perturb_sigma
     '''
     Create an experiment to train the specified model configuration.
     :param model_name: The name of the model/network configuration to use
-    :param train_eval_with_pascal: Bool indicating whether to train and evaluate on PASCAL 3D+ data
+    :param train_eval_with_pascal: Bool indicating whether to train and evaluate on PASCAL 3D+ data. Train on synthetic data if false
     :param initial_weights_path: Path to the initial weights to use
     :param perturb_sigma: The sigma of the Gaussian by which to perturb the keypoint map, if applicable
     :return:
@@ -1225,6 +1225,8 @@ def main(model_name, train_eval_with_pascal, initial_weights_path, perturb_sigma
     # verify_netspec(z_test_model, initial_weights_path)
 
     # Get experiment folder names
+    if not os.path.isdir(gv.g_experiments_root_folder):
+        os.makedirs(gv.g_experiments_root_folder)
     exp_folder_names = os.listdir(gv.g_experiments_root_folder)
     # Get last experiment folder name
     if len(exp_folder_names) != 0:
@@ -1251,6 +1253,9 @@ def main(model_name, train_eval_with_pascal, initial_weights_path, perturb_sigma
     os.mkdir(model_path)
     os.mkdir(progress_path)
     os.mkdir(snapshots_path)
+
+    # Create link to initial weights
+    os.symlink(initial_weights_path, os.path.join(snapshots_path, 'snapshot_iter_0.caffemodel'))
 
     # Create train and test model files
     if not pascal_test_only:
@@ -1290,7 +1295,7 @@ def main(model_name, train_eval_with_pascal, initial_weights_path, perturb_sigma
     train_script_contents = train_script_contents.replace('[[INITIAL_WEIGHTS]]', initial_weights_path)
     train_script_contents = train_script_contents.replace('[[EXPERIMENT_FOLDER_NAME]]', cur_exp_folder_name)
     train_script_contents = train_script_contents.replace('[[EXPERIMENTS_ROOT]]', gv.g_experiments_root_folder)
-    train_script_contents = train_script_contents.replace('[[PBS_SCRIPT_DIR]]', gv.g_pbs_script_dir)
+    train_script_contents = train_script_contents.replace('[[TRAIN_ROOT]]', gv.g_corresp_model_root_folder)
     # Save script
     with open(os.path.join(model_path, 'train.sh'), 'w') as f:
         f.write(train_script_contents)
@@ -1303,7 +1308,7 @@ def main(model_name, train_eval_with_pascal, initial_weights_path, perturb_sigma
     # Replace variables in script
     resume_script_contents = resume_script_contents.replace('[[EXPERIMENT_FOLDER_NAME]]', cur_exp_folder_name)
     resume_script_contents = resume_script_contents.replace('[[EXPERIMENTS_ROOT]]', gv.g_experiments_root_folder)
-    resume_script_contents = resume_script_contents.replace('[[PBS_SCRIPT_DIR]]', gv.g_pbs_script_dir)
+    resume_script_contents = resume_script_contents.replace('[[TRAIN_ROOT]]', gv.g_corresp_model_root_folder)
     # Save script
     with open(os.path.join(model_path, 'resume.sh'), 'w') as f:
         f.write(resume_script_contents)
@@ -1365,9 +1370,9 @@ def main(model_name, train_eval_with_pascal, initial_weights_path, perturb_sigma
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('model_name', type=str, help='The name of the model/network')
-    parser.add_argument('--pascal', action='store_true', help='Flag to train and evaluate on PASCAL 3D+')
-    parser.add_argument('--init_weight_path', type=str, nargs=1, default=gv.g_render4cnn_weights_path, help='Path of weights to intialize the model with. It is set to the original R4CNN weights by default')
+    parser.add_argument('model_name', type=str, help='The name of the model/network. See main() of create_caffe_nets.py for options.')
+    parser.add_argument('--pascal', action='store_true', help='Flag to train and evaluate on PASCAL 3D+. Will train on synthetic data by default.')
+    parser.add_argument('--init_weight_path', type=str, nargs=1, default=gv.g_caffe_param_file, help='Path of weights to intialize the model with. It is set to the original R4CNN weights by default')
     parser.add_argument('--perturb_sigma', type=int, nargs=1, default=0, help='How much to perturb the keypoint map by. Only used for keypoint perturbation models')
 
     args = parser.parse_args()

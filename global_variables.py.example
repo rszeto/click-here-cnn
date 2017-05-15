@@ -11,8 +11,9 @@ g_render4cnn_root_folder = os.path.dirname(os.path.abspath(__file__))
 # ------------------------------------------------------------
 g_blender_executable_path = 'blender' #!! MODIFY if necessary
 g_matlab_executable_path = 'matlab' # !! MODIFY if necessary
-g_pycaffe_path = '/path/to/caffe-r4cnn/python' # !! MODIFY
+g_pycaffe_path = '/path/to/caffe-r4cnn' # !! MODIFY
 g_data_folder = '/path/to/large/fs' # !! MODIFY. If generating training data, should be >3 TB
+g_pycaffe_path = os.path.join(g_caffe_path, 'python')
 g_datasets_folder = os.path.abspath(os.path.join(g_render4cnn_root_folder, 'datasets'))
 g_shapenet_root_folder = os.path.join(g_datasets_folder, 'shapenet-correspondences')
 g_pascal3d_root_folder = os.path.join(g_datasets_folder, 'pascal3d')

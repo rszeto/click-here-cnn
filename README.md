@@ -161,15 +161,60 @@ This takes at least a day on multiple cores.
 
 ## Training our models
 
-TODO
+This section describes how to create and evaluate the models from our paper.
+
+### Download R4CNN weights
+
+Run the `fetch_model.sh` script to download the R4CNN weights from the original authors.
+
+	cd caffe_models
+	./fetch_model.sh
+	./fetch_model.sh  # Run again for the checksum
+
+### Create a training run
+
+The `create_caffe_nets.py` script in the `view_estimation_correspondences` folder provides an interface to automatically generate a training run (a.k.a. experiment). For example, to create an experiment to train our full CH-CNN model, run these commands:
+
+	cd view_estimation_correspondences
+	python create_caffe_nets.py CH-CNN
+
+This creates a folder for the experiment under `experiments`; it is named with the experiment number and the timestamp for the date when it was generated. The script prompts you to add notes for the experiment, which are saved in `README.md` under the newly-created experiment folder.
+
+Other model names such as `R4CNN`, `fixed_weight_map_uniform`, and `CH-CNN_kpm_only` can be used in place of `CH-CNN`. To see all available options, read the `main` function in `create_caffe_nets.py`.
+
+By default, models are initialized with R4CNN weights and trained on synthetic data. The model weights and training/evaluation sets can be overridden by passing the following options to `create_caffe_nets.py`:
+
+* `--pascal`: Train and evaluate on the PASCAL 3D+ data
+* `--init_weight_path <path_to_caffemodel_file>`: Use the given caffemodel file to initialize the model weights
+
+### Running and resuming an experiment
+
+To start a training run from the beginning, run the `start_training.py` script. Below is an example of running experiment 1 (000001):
+
+	cd train
+	python start_training.py --exp_num 1
+
+To resume an experiment from the latest solver state, run the same script with the `--resume` flag:
+
+	python start_training.py --exp_num 1 --resume
+
+Progress logs are stored in `experiments/<exp_folder>/progress`.
 
 ### Monitoring training progress
 
 TODO
 
+### Evaluating a trained model
+
+A trained model can be evaluated with the same evaluation script as mentioned in ["Run experiments"](#run-experiments), just without the `--demo` flag.
+
+	cd view_estimation_correspondences/eval_scripts
+	python evaluateAcc.py <exp_num> <iter_num> --cache_preds
+
+`iter_num` refers to the iteration number of the desired snapshot. `--cache_preds` is an optional flag that tells the script to save the angle scores to disk. This is useful for visualization (see ["Generate visualizations"](#generate-visualizations)).
+
 <!--
 # TODOS
 
 * Update training curve plot code
-* Add instructions for generating and training models
 -->
