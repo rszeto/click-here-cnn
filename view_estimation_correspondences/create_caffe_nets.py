@@ -36,7 +36,7 @@ DEFAULT_BIAS_FILLER = dict(type='constant', value=0)
 DEFAULT_DROPOUT_RATIO = 0.5
 DEFAULT_ANGLE_NAMES = ['azimuth', 'elevation', 'tilt']
 DEFAULT_LOSS_WEIGHTS = [1, 1, 1]
-BATCH_SIZE = 64
+BATCH_SIZE = 192
 
 # Parameters for angle softmax+loss
 DEFAULT_SOFTMAX_VIEW_LOSS_PARAM_A = dict(bandwidth=15, sigma=5, pos_weight=1, neg_weight=0, period=360)
@@ -1099,6 +1099,201 @@ def create_model_chcnn_kpc_only(lmdb_paths, batch_size, crop_size=gv.g_images_re
 
     return n.to_proto()
 
+'''
+Concat fc7 with fc-keypoint-map and fc-keypoint-class
+'''
+def create_model_a(lmdb_paths, batch_size, crop_size=gv.g_images_resize_dim, imagenet_mean_file=gv.g_image_mean_binaryproto_file):
+    train_data_lmdb_path = lmdb_paths[0]
+    keypoint_map_lmdb_path = lmdb_paths[1]
+    keypoint_class_lmdb_path = lmdb_paths[2]
+    train_label_lmdb_path = lmdb_paths[3]
+    data_transform_param = dict(
+        crop_size=crop_size,
+        mean_file=imagenet_mean_file,
+        mirror=False
+    )
+
+    n = caffe.NetSpec()
+    # Data layers
+    n['data'] = L.Data(name='data', batch_size=batch_size, backend=P.Data.LMDB, source=train_data_lmdb_path, transform_param=data_transform_param)
+    n['keypoint_map'] = L.Data(name='keypoint_map', batch_size=batch_size, backend=P.Data.LMDB, source=keypoint_map_lmdb_path)
+    n['keypoint_class'] = L.Data(name='keypoint_class', batch_size=batch_size, backend=P.Data.LMDB, source=keypoint_class_lmdb_path)
+    n['label'] = L.Data(name='label', batch_size=batch_size, backend=P.Data.LMDB, source=train_label_lmdb_path)
+    n['label_class'], n['label_azimuth'], n['label_elevation'], n['label_tilt'] = L.Slice(name='labe-slice', bottom='label', ntop=4, slice_param=dict(
+        slice_dim=1, slice_point=[1,2,3]
+    ))
+    n['silence-label_class'] = L.Silence(name='silence-label_class', bottom='label_class', ntop=0)
+
+    # Image (Render for CNN) features
+    conv1_param = dict(num_output=96, kernel_size=11, stride=4)
+    pool1_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    conv2_param = dict(num_output=256, pad=2, kernel_size=5, group=2)
+    pool2_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    conv3_param = dict(num_output=384, pad=1, kernel_size=3)
+    conv4_param = dict(num_output=384, pad=1, kernel_size=3, group=2)
+    conv5_param = dict(num_output=256, pad=1, kernel_size=3, group=2)
+    pool5_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    conv1_out_name = add_wrapped_conv_layer(n, 'conv1', 'data', conv1_param, pooling_param=pool1_param, lrn_param=DEFAULT_LRN_PARAM)
+    conv2_out_name = add_wrapped_conv_layer(n, 'conv2', conv1_out_name, conv2_param, pooling_param=pool2_param, lrn_param=DEFAULT_LRN_PARAM)
+    conv3_out_name = add_wrapped_conv_layer(n, 'conv3', conv2_out_name, conv3_param)
+    conv4_out_name = add_wrapped_conv_layer(n, 'conv4', conv3_out_name, conv4_param, param=DEFAULT_DECAY_PARAM)
+    conv5_out_name = add_wrapped_conv_layer(n, 'conv5', conv4_out_name, conv5_param, param=DEFAULT_DECAY_PARAM, pooling_param=pool5_param)
+    fc6_out_name = add_wrapped_fc_layer(n, 'fc6', conv5_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+    fc7_out_name = add_wrapped_fc_layer(n, 'fc7', fc6_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+
+    # Keypoint map features
+    scale_keypoint_map_param = dict(filler=dict(value=1/227.0))
+    pool_keypoint_map_param = dict(pool=P.Pooling.MAX, kernel_size=5, stride=5, pad=3)
+    reshape_keypoint_map_param = dict(shape=dict(dim=[0, 2116, 1, 1]))
+    n['scale-keypoint-map'] = L.Scale(name='scale-keypoint-map', bottom='keypoint_map', param=NO_LEARN_PARAM, scale_param=scale_keypoint_map_param)
+    n['pool-keypoint-map'] = L.Pooling(name='pool-keypoint-map', bottom='scale-keypoint-map', pooling_param=pool_keypoint_map_param)
+    fc_keypoint_map_name = add_wrapped_fc_layer(n, 'fc-keypoint-map', 'pool-keypoint-map', 2116, use_relu=False)
+
+    # Keypoint class features
+    fc_keypoint_class_name = add_wrapped_fc_layer(n, 'fc-keypoint-class', 'keypoint_class', 34, use_relu=False)
+
+    # Attention map
+    # keypoint_concat_param = dict(axis=1)
+    attn_param = dict(shape=dict(dim=[0, 1, 13, 13]))
+    n['keypoint-concat'] = L.Concat(name='keypoint-concat', bottom=[fc_keypoint_map_name, fc_keypoint_class_name, fc7_out_name])
+    fc_keypoint_concat_name = add_wrapped_fc_layer(n, 'fc-keypoint-concat', 'keypoint-concat', 169, use_relu=False)
+    n['fc-keypoint-concat-softmax'] = L.Softmax(name='fc-keypoint-concat-softmax', bottom=fc_keypoint_concat_name)
+    n['attn'] = L.Reshape(name='attn', bottom='fc-keypoint-concat-softmax', reshape_param=attn_param)
+
+    # Get conv4 attention vector. First, slice channels
+    add_slice_layer(n, 'conv4', ['conv4_slice_' + str(i) for i in range(384)], dict(
+        axis=1, slice_point=range(1, 384)
+    ))
+    # Then weigh each channel by the map
+    for i in range(384):
+        slice_bottom_name = 'conv4_slice_' + str(i)
+        top_name = 'conv4_weighted_' + str(i)
+        n[top_name] = L.Eltwise(name=top_name, bottom=[slice_bottom_name, 'attn'], eltwise_param=dict(operation=P.Eltwise.PROD))
+    # Combine weighted maps
+    n['conv4_weighted'] = L.Concat(name='conv4_weighted', bottom=['conv4_weighted_' + str(i) for i in range(384)])
+    # Sum across width
+    add_slice_layer(n, 'conv4_weighted', ['conv4_weighted_slice_' + str(i) for i in range(13)], dict(
+        axis=3, slice_point=range(1, 13)
+    ))
+    n['conv4_weighted_a'] = L.Eltwise(name='conv4_weighted_a', bottom=['conv4_weighted_slice_' + str(i) for i in range(13)], eltwise_param=dict(operation=P.Eltwise.SUM))
+    # Sum across height
+    add_slice_layer(n, 'conv4_weighted_a', ['conv4_weighted_a_slice_' + str(i) for i in range(13)], dict(
+        axis=2, slice_point=range(1, 13)
+    ))
+    n['conv4_weighted_b'] = L.Eltwise(name='conv4_weighted_a', bottom=['conv4_weighted_a_slice_' + str(i) for i in range(13)], eltwise_param=dict(operation=P.Eltwise.SUM))
+    # Finally, flatten to get attention vector
+    n['conv4-a'] = L.Flatten(name='conv4-a', bottom='conv4_weighted_b')
+
+    # Fusion
+    n['fc7-concat'] = L.Concat(name='fc7-concat', bottom=[fc7_out_name, 'conv4-a'])
+    fc8_out_name = add_wrapped_fc_layer(n, 'fc8', 'fc7-concat', 4096, param=DEFAULT_DECAY_PARAM, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+
+    # Prediction and loss layers
+    add_prediction_layers(n, 'pred_', fc8_out_name, param=DEFAULT_DECAY_PARAM)
+    add_loss_acc_layers(n, ['pred_', 'label_'])
+
+    return n.to_proto()
+
+'''
+Pass fc7 through FC layer; concat result with fc-keypoint-map and fc-keypoint-class
+'''
+def create_model_b(lmdb_paths, batch_size, crop_size=gv.g_images_resize_dim, imagenet_mean_file=gv.g_image_mean_binaryproto_file):
+    train_data_lmdb_path = lmdb_paths[0]
+    keypoint_map_lmdb_path = lmdb_paths[1]
+    keypoint_class_lmdb_path = lmdb_paths[2]
+    train_label_lmdb_path = lmdb_paths[3]
+    data_transform_param = dict(
+        crop_size=crop_size,
+        mean_file=imagenet_mean_file,
+        mirror=False
+    )
+
+    n = caffe.NetSpec()
+    # Data layers
+    n['data'] = L.Data(name='data', batch_size=batch_size, backend=P.Data.LMDB, source=train_data_lmdb_path, transform_param=data_transform_param)
+    n['keypoint_map'] = L.Data(name='keypoint_map', batch_size=batch_size, backend=P.Data.LMDB, source=keypoint_map_lmdb_path)
+    n['keypoint_class'] = L.Data(name='keypoint_class', batch_size=batch_size, backend=P.Data.LMDB, source=keypoint_class_lmdb_path)
+    n['label'] = L.Data(name='label', batch_size=batch_size, backend=P.Data.LMDB, source=train_label_lmdb_path)
+    n['label_class'], n['label_azimuth'], n['label_elevation'], n['label_tilt'] = L.Slice(name='labe-slice', bottom='label', ntop=4, slice_param=dict(
+        slice_dim=1, slice_point=[1,2,3]
+    ))
+    n['silence-label_class'] = L.Silence(name='silence-label_class', bottom='label_class', ntop=0)
+
+    # Image (Render for CNN) features
+    conv1_param = dict(num_output=96, kernel_size=11, stride=4)
+    pool1_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    conv2_param = dict(num_output=256, pad=2, kernel_size=5, group=2)
+    pool2_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    conv3_param = dict(num_output=384, pad=1, kernel_size=3)
+    conv4_param = dict(num_output=384, pad=1, kernel_size=3, group=2)
+    conv5_param = dict(num_output=256, pad=1, kernel_size=3, group=2)
+    pool5_param = dict(pool=P.Pooling.MAX, kernel_size=3, stride=2)
+    conv1_out_name = add_wrapped_conv_layer(n, 'conv1', 'data', conv1_param, pooling_param=pool1_param, lrn_param=DEFAULT_LRN_PARAM)
+    conv2_out_name = add_wrapped_conv_layer(n, 'conv2', conv1_out_name, conv2_param, pooling_param=pool2_param, lrn_param=DEFAULT_LRN_PARAM)
+    conv3_out_name = add_wrapped_conv_layer(n, 'conv3', conv2_out_name, conv3_param)
+    conv4_out_name = add_wrapped_conv_layer(n, 'conv4', conv3_out_name, conv4_param, param=DEFAULT_DECAY_PARAM)
+    conv5_out_name = add_wrapped_conv_layer(n, 'conv5', conv4_out_name, conv5_param, param=DEFAULT_DECAY_PARAM, pooling_param=pool5_param)
+    fc6_out_name = add_wrapped_fc_layer(n, 'fc6', conv5_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+    fc7_out_name = add_wrapped_fc_layer(n, 'fc7', fc6_out_name, 4096, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+
+    # Keypoint map features
+    scale_keypoint_map_param = dict(filler=dict(value=1/227.0))
+    pool_keypoint_map_param = dict(pool=P.Pooling.MAX, kernel_size=5, stride=5, pad=3)
+    reshape_keypoint_map_param = dict(shape=dict(dim=[0, 2116, 1, 1]))
+    n['scale-keypoint-map'] = L.Scale(name='scale-keypoint-map', bottom='keypoint_map', param=NO_LEARN_PARAM, scale_param=scale_keypoint_map_param)
+    n['pool-keypoint-map'] = L.Pooling(name='pool-keypoint-map', bottom='scale-keypoint-map', pooling_param=pool_keypoint_map_param)
+    fc_keypoint_map_name = add_wrapped_fc_layer(n, 'fc-keypoint-map', 'pool-keypoint-map', 2116, use_relu=False)
+
+    # Keypoint class features
+    fc_keypoint_class_name = add_wrapped_fc_layer(n, 'fc-keypoint-class', 'keypoint_class', 34, use_relu=False)
+
+    # fc7-keypoint features
+    fc7_keypoint_out_name = add_wrapped_fc_layer(n, 'fc7-keypoint', fc7_out_name, 2150, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+
+    # Attention map
+    # keypoint_concat_param = dict(axis=1)
+    attn_param = dict(shape=dict(dim=[0, 1, 13, 13]))
+    n['keypoint-concat'] = L.Concat(name='keypoint-concat', bottom=[fc_keypoint_map_name, fc_keypoint_class_name, fc7_keypoint_out_name])
+    fc_keypoint_concat_name = add_wrapped_fc_layer(n, 'fc-keypoint-concat', 'keypoint-concat', 169, use_relu=False)
+    n['fc-keypoint-concat-softmax'] = L.Softmax(name='fc-keypoint-concat-softmax', bottom=fc_keypoint_concat_name)
+    n['attn'] = L.Reshape(name='attn', bottom='fc-keypoint-concat-softmax', reshape_param=attn_param)
+
+    # Get conv4 attention vector. First, slice channels
+    add_slice_layer(n, 'conv4', ['conv4_slice_' + str(i) for i in range(384)], dict(
+        axis=1, slice_point=range(1, 384)
+    ))
+    # Then weigh each channel by the map
+    for i in range(384):
+        slice_bottom_name = 'conv4_slice_' + str(i)
+        top_name = 'conv4_weighted_' + str(i)
+        n[top_name] = L.Eltwise(name=top_name, bottom=[slice_bottom_name, 'attn'], eltwise_param=dict(operation=P.Eltwise.PROD))
+    # Combine weighted maps
+    n['conv4_weighted'] = L.Concat(name='conv4_weighted', bottom=['conv4_weighted_' + str(i) for i in range(384)])
+    # Sum across width
+    add_slice_layer(n, 'conv4_weighted', ['conv4_weighted_slice_' + str(i) for i in range(13)], dict(
+        axis=3, slice_point=range(1, 13)
+    ))
+    n['conv4_weighted_a'] = L.Eltwise(name='conv4_weighted_a', bottom=['conv4_weighted_slice_' + str(i) for i in range(13)], eltwise_param=dict(operation=P.Eltwise.SUM))
+    # Sum across height
+    add_slice_layer(n, 'conv4_weighted_a', ['conv4_weighted_a_slice_' + str(i) for i in range(13)], dict(
+        axis=2, slice_point=range(1, 13)
+    ))
+    n['conv4_weighted_b'] = L.Eltwise(name='conv4_weighted_a', bottom=['conv4_weighted_a_slice_' + str(i) for i in range(13)], eltwise_param=dict(operation=P.Eltwise.SUM))
+    # Finally, flatten to get attention vector
+    n['conv4-a'] = L.Flatten(name='conv4-a', bottom='conv4_weighted_b')
+
+    # Fusion
+    n['fc7-concat'] = L.Concat(name='fc7-concat', bottom=[fc7_out_name, 'conv4-a'])
+    fc8_out_name = add_wrapped_fc_layer(n, 'fc8', 'fc7-concat', 4096, param=DEFAULT_DECAY_PARAM, dropout_ratio=DEFAULT_DROPOUT_RATIO)
+
+    # Prediction and loss layers
+    add_prediction_layers(n, 'pred_', fc8_out_name, param=DEFAULT_DECAY_PARAM)
+    add_loss_acc_layers(n, ['pred_', 'label_'])
+
+    return n.to_proto()
+
+
+
 
 def main(model_name, train_eval_with_pascal, initial_weights_path, perturb_sigma):
     '''
@@ -1201,6 +1396,27 @@ def main(model_name, train_eval_with_pascal, initial_weights_path, perturb_sigma
         create_model_fn = create_model_chcnn_chessboard
         pascal_test_only = True
 
+    # Random keypoint class (test only)
+    elif model_name == 'CH-CNN_random_kpc':
+        sub_lmdb_names = ['image_lmdb', 'chessboard_dt_map_lmdb', 'random_keypoint_class_lmdb', 'viewpoint_label_lmdb']
+        input_data_shapes = dict(data=(1, 3, 227, 227), keypoint_map=(1, 1, 227, 227), keypoint_class=(1, 34, 1, 1))
+        create_model_fn = create_model_chcnn_chessboard
+        pascal_test_only = True
+
+    # fc7 concatenated with fc-keypoint-map and fc-keypoint-class
+    elif model_name == 'a':
+        sub_lmdb_names = ['image_lmdb', 'chessboard_dt_map_lmdb', 'keypoint_class_lmdb', 'viewpoint_label_lmdb']
+        input_data_shapes = dict(data=(1, 3, 227, 227), keypoint_map=(1, 1, 227, 227), keypoint_class=(1, 34, 1, 1))
+        create_model_fn = create_model_a
+        pascal_test_only = False
+
+    # fc7 to FC layer, result concatenated with fc-keypoint-map and fc-keypoint-class
+    elif model_name == 'b':
+        sub_lmdb_names = ['image_lmdb', 'chessboard_dt_map_lmdb', 'keypoint_class_lmdb', 'viewpoint_label_lmdb']
+        input_data_shapes = dict(data=(1, 3, 227, 227), keypoint_map=(1, 1, 227, 227), keypoint_class=(1, 34, 1, 1))
+        create_model_fn = create_model_b
+        pascal_test_only = False
+
     # Force PASCAL 3D+ usage if the configuration only evaluates on PASCAL 3D+ test set
     if pascal_test_only:
         train_eval_with_pascal = True
@@ -1220,9 +1436,9 @@ def main(model_name, train_eval_with_pascal, initial_weights_path, perturb_sigma
     # Verify the models
     if not pascal_test_only:
         z_train_model = create_model_fn(train_lmdb_paths, BATCH_SIZE)
-        # verify_netspec(z_train_model, initial_weights_path)
+        verify_netspec(z_train_model, initial_weights_path)
     z_test_model = create_model_fn(test_lmdb_paths, BATCH_SIZE)
-    # verify_netspec(z_test_model, initial_weights_path)
+    verify_netspec(z_test_model, initial_weights_path)
 
     # Get experiment folder names
     if not os.path.isdir(gv.g_experiments_root_folder):
@@ -1372,8 +1588,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('model_name', type=str, help='The name of the model/network. See main() of create_caffe_nets.py for options.')
     parser.add_argument('--pascal', action='store_true', help='Flag to train and evaluate on PASCAL 3D+. Will train on synthetic data by default.')
-    parser.add_argument('--init_weight_path', type=str, nargs=1, default=gv.g_caffe_param_file, help='Path of weights to intialize the model with. It is set to the original R4CNN weights by default')
-    parser.add_argument('--perturb_sigma', type=int, nargs=1, default=0, help='How much to perturb the keypoint map by. Only used for keypoint perturbation models')
+    parser.add_argument('--init_weight_path', type=str, default=gv.g_caffe_param_file, help='Path of weights to intialize the model with. It is set to the original R4CNN weights by default')
+    parser.add_argument('--perturb_sigma', type=int, default=0, help='How much to perturb the keypoint map by. Only used for keypoint perturbation models')
 
     args = parser.parse_args()
 

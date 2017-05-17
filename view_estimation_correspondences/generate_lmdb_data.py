@@ -67,7 +67,8 @@ def generate_lmdb_data(info_file_path, lmdb_data_root, reverse, num_workers=NUM_
         perturbed_30_chessboard_dt_map=os.path.join(lmdb_data_root, 'perturbed_30_chessboard_dt_map'),
         perturbed_35_chessboard_dt_map=os.path.join(lmdb_data_root, 'perturbed_35_chessboard_dt_map'),
         perturbed_40_chessboard_dt_map=os.path.join(lmdb_data_root, 'perturbed_40_chessboard_dt_map'),
-        perturbed_45_chessboard_dt_map=os.path.join(lmdb_data_root, 'perturbed_45_chessboard_dt_map')
+        perturbed_45_chessboard_dt_map=os.path.join(lmdb_data_root, 'perturbed_45_chessboard_dt_map'),
+        random_keypoint_class_vector=os.path.join(lmdb_data_root, 'random_keypoint_class')
     )
 
     # Create folders under the data root
@@ -141,7 +142,7 @@ def save_data_for_job(job, lmdb_data_paths):
     euclidean_dt_map = job_to_euclidean_dt_map(job)
     path = os.path.join(lmdb_data_paths['euclidean_dt_map'], job_key + '.npy')
     np.save(path, euclidean_dt_map)
-    
+
     manhattan_dt_map = job_to_manhattan_dt_map(job)
     path = os.path.join(lmdb_data_paths['manhattan_dt_map'], job_key + '.npy')
     np.save(path, manhattan_dt_map)
@@ -167,6 +168,10 @@ def save_data_for_job(job, lmdb_data_paths):
         path_key = 'perturbed_%d_chessboard_dt_map' % perturb_sigma
         path = os.path.join(lmdb_data_paths[path_key], job_key + '.png')
         imsave(path, perturbed_chessboard_dt_map)
+
+    random_keypoint_class_vector = job_to_random_keypoint_class_vector(job)
+    path = os.path.join(lmdb_data_paths['random_keypoint_class_vector'], job_key + '.npy')
+    np.save(path, random_keypoint_class_vector)
 
 
 def get_job_key(job):
@@ -287,6 +292,16 @@ def job_to_keypoint_class_vector(job):
     keypoint_class_vec = np.zeros(len(utils.KEYPOINT_CLASSES), dtype=np.uint8)
     keypoint_class_vec[keypoint_class] = 1
 
+    return keypoint_class_vec
+
+'''
+@args
+    job ((str, str, bool)): A job tuple consisting of the key prefix, the line describing the instance, and
+        whether this example should be flipped
+'''
+def job_to_random_keypoint_class_vector(job):
+    keypoint_class_vec = np.zeros(len(utils.KEYPOINT_CLASSES), dtype=np.uint8)
+    keypoint_class_vec[np.random.randint(0, len(utils.KEYPOINT_CLASSES))] = 1
     return keypoint_class_vec
 
 '''

@@ -57,6 +57,9 @@ def generate_lmdb_from_data(lmdb_data_root, lmdb_root, keys, is_pascal_test=Fals
     keypoint_map_perturbed_data_roots = [os.path.join(lmdb_data_root, 'perturbed_%d_chessboard_dt_map' % perturb_sigma) for perturb_sigma in perturbation_sigmas]
     keypoint_map_perturbed_lmdb_roots = [os.path.join(lmdb_root, 'perturbed_%d_chessboard_dt_map_lmdb' % perturb_sigma) for perturb_sigma in perturbation_sigmas]
 
+    random_keypoint_class_data_root = os.path.join(lmdb_data_root, 'random_keypoint_class')
+    random_keypoint_class_lmdb_root = os.path.join(lmdb_root, 'random_keypoint_class_lmdb')
+
     # Create and run all the LMDB creation processes in parallel
     processes = []
     # Image
@@ -82,6 +85,10 @@ def generate_lmdb_from_data(lmdb_data_root, lmdb_root, keys, is_pascal_test=Fals
     if is_pascal_test:
         for i, sigma in enumerate(perturbation_sigmas):
             processes.append(Process(target=utils.create_image_lmdb, args=(keypoint_map_perturbed_data_roots[i], keypoint_map_perturbed_lmdb_roots[i], keys)))
+    # Random keypoint class
+    if is_pascal_test:
+        processes.append(Process(target=utils.create_vector_lmdb, args=(random_keypoint_class_data_root, random_keypoint_class_lmdb_root, keys)))
+
 
     for p in processes:
         p.start()
