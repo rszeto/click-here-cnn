@@ -5,12 +5,13 @@ Ryan Szeto and Jason J. Corso, University of Michigan
 
 If you use this work in your research, please cite the following paper:
 
-	@article{szeto2017click,
-	  title={Click Here: Human-Localized Keypoints as Guidance for Viewpoint Estimation},
-	  author={Szeto, Ryan and Corso, Jason J},
-	  journal={arXiv preprint arXiv:1703.09859},
-	  year={2017}
-	}
+    @inproceedings{szeto2017click,
+      author = "Szeto, Ryan and Corso, Jason J.",
+      title = "Click Here: Human-Localized Keypoints as Guidance for Viewpoint Estimation",
+      booktitle = "IEEE International Conference on Computer Vision (ICCV)",
+      month = "Oct",
+      year = "2017"
+    }
 
 I ran this code from scratch, so it should work. However, feel free to contact me at `szetor [at] umich [dot] edu` if you have trouble.
 
